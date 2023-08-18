@@ -5,6 +5,7 @@ import json
 from tqdm import tqdm
 from peft import PeftModel, PeftModelForCausalLM, LoraConfig
 import transformers
+from torchmetrics.text.rouge import ROUGEScore
 import argparse
 import warnings
 from datasets import load_dataset
@@ -124,6 +125,7 @@ class SciMRCDataset(Dataset):
         example = self.data[index]
         input = example['input'][:8000]
         _id = example['id']
+        summary = example['summary']
 
         # prompt = generate_prompt(instruction, input=input)
         prompt = "###Summarize the following academic paper: {paper} \n ###Summary:".format(paper=input)
@@ -131,10 +133,15 @@ class SciMRCDataset(Dataset):
                                 truncation=True, return_tensors="pt")
         input_ids = inputs['input_ids'][0]
 
-        return _id, input_ids
+        return _id, input_ids, summary
     
     def __len__(self):
         return len(self.data)
+
+
+def compute_metrics(preds, labels):
+    rouge = ROUGEScore()
+    return rouge(preds, labels)
 
 
 def predict(args, data_loader):
@@ -154,7 +161,9 @@ def predict(args, data_loader):
     )
 
     outputs = []
-    for _ids, input_ids in tqdm(data_loader):
+    predictions, labels = [], []
+    for batch in tqdm(data_loader):
+        _ids, input_ids, summaries = batch
         input_ids = input_ids.cuda()
         preds = evaluate(generation_config, model, input_ids)
         for _id, pred in zip(_ids, preds):
@@ -163,6 +172,11 @@ def predict(args, data_loader):
                 'summary': pred
             })
 
+        labels.extend(summaries)
+        predictions.extend(preds)
+
+    rouge_score = compute_metrics(predictions, labels)
+    print(rouge_score)
     return outputs
 
 

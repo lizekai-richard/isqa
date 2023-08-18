@@ -5,16 +5,22 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="8b46bde0-9d80-4e59-b86f-5934bfec1135" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/inference_helper.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/evaluate.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/evaluate.sh" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/summarization.py" beforeDir="false" afterPath="$PROJECT_DIR$/inference.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/summarization.sh" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/summarization.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/zero_shot_summ.py" beforeDir="false" afterPath="$PROJECT_DIR$/zero_shot_summ.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/inference.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -59,7 +65,8 @@
       <workItem from="1692148884268" duration="452000" />
       <workItem from="1692168394437" duration="3686000" />
       <workItem from="1692185296385" duration="422000" />
-      <workItem from="1692341403195" duration="1435000" />
+      <workItem from="1692341403195" duration="2071000" />
+      <workItem from="1692354903857" duration="3050000" />
     </task>
     <servers />
   </component>
