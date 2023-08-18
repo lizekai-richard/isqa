@@ -42,7 +42,7 @@ def inference(args, model, tokenizer, prompt):
     if model.config.is_encoder_decoder:
         output_ids = output_ids[0]
     else:
-        output_ids = output_ids[0][len(input_ids[0]) :]
+        output_ids = output_ids[0][len(input_ids[0]):]
     outputs = tokenizer.decode(
         output_ids, skip_special_tokens=True, spaces_between_special_tokens=False
     )
@@ -84,7 +84,6 @@ if __name__ == "__main__":
         summary = example['summary']
         paper = example['text'][:10000]
         msg = args.prompt.format(text=paper)
-
 
         conv = get_conversation_template(args.model_path)
         conv.append_message(conv.roles[0], msg)
