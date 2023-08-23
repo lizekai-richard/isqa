@@ -88,7 +88,7 @@ def evaluate(args, model, data_loader):
             input_ids = input_ids.cuda()
 
             output_ids = model.generate(
-                input_ids,
+                input_ids=input_ids,
                 max_new_tokens=args.max_new_tokens,
                 min_new_tokens=args.min_new_tokens,
                 top_p=args.top_p,

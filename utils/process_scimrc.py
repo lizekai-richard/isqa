@@ -2,17 +2,19 @@ import json
 import uuid
 
 scimrc_data = []
-with open("../results/data/new_smrc_train.jsonl", "r") as f:
+with open("../Data/SciMRC/new_smrc_train.jsonl", "r") as f:
     for d in f:
         scimrc_data.append(json.loads(d))
 
-
+print("Here")
 processed_data = []
 processed_easy = []
 processed_medium = []
 processed_hard = []
 total_len = 0.0
 total_examples = 0.0
+cnt = 0
+avg_evi_len = 0.0
 
 for example in scimrc_data:
     _id = str(uuid.uuid4())
@@ -34,7 +36,10 @@ for example in scimrc_data:
         question_level = int(qa['annotateType'])
 
         for answer in qa['answers']:
+            unanswerable = answer['answer']['unanswerable']
             answer_text = answer['answer']['free_form_answer']
+            evidence = answer['answer']['evidence'][0]
+            print("evidence:" + evidence + "  answer: " + answer_text)
             processed_data.append({
                 'id': _id,
                 'text': text,
@@ -66,7 +71,9 @@ for example in scimrc_data:
                     'question': question,
                     'answer': answer_text
                 })
+        break
 
+print(avg_evi_len / len(scimrc_data))
 print(len(processed_data))
 print(len(processed_easy)) #826
 print(len(processed_medium)) #1427
