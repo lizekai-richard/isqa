@@ -26,10 +26,10 @@ class SciMRCDataset(Dataset):
 
     def __getitem__(self, index):
         example = self.data[index]
-        instruction = example['question'] + " Reply N.A. if the question is unanswerable."
-        input = example['text']
-        _id = example['id']
-        answer = example['answer']
+        instruction = example['instruction'] + " Reply N.A. if the question is unanswerable."
+        input = example['input']
+        # _id = example['id']
+        answer = example['output']
 
         # prompt = generate_prompt(instruction, input=input)
         prompt = f"""Below is an instruction that describes a task, paired with an input that provides further context. 
@@ -42,7 +42,7 @@ class SciMRCDataset(Dataset):
                                 truncation=True, return_tensors="pt")
         input_ids = inputs['input_ids'][0]
 
-        return _id, input_ids, answer
+        return input_ids, answer
 
     def __len__(self):
         return len(self.data)
@@ -60,7 +60,7 @@ def prepare_model(args):
         load_in_8bit=args.use_8bit,
         device_map=device_map,
     )
-
+    print(args.lora_path)
     model = PeftModel.from_pretrained(model, args.lora_path)
 
     if args.use_8bit is True:
@@ -83,7 +83,7 @@ def evaluate(args, model, data_loader):
     labels, predictions = [], []
     with torch.no_grad():
         for batch in tqdm(data_loader):
-            _ids, input_ids, answers = batch
+            input_ids, answers = batch
             input_ids = input_ids.cuda()
 
             output_ids = model.generate(
@@ -134,13 +134,13 @@ if __name__ == '__main__':
     args.world_size = int(os.environ.get("WORLD_SIZE", 1))
     args.ddp = args.world_size != 1
 
-    tokenizer = LlamaTokenizer.from_pretrained(args.model_path, add_eos_token=True)
-    # tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
+    tokenizer = LlamaTokenizer.from_pretrained(args.model_path, add_eos_token=True, padding_side='left')
+    tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
 
     model = prepare_model(args)
 
     data = load_dataset("json", data_files=args.data_path)['train']
-    data = data.select(range(len(data))[-800:])
+    data = data.select(range(len(data))[-4000:])
     test_dataset = SciMRCDataset(tokenizer, data)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
