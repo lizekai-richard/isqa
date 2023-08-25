@@ -1,4 +1,5 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
 from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -26,7 +27,7 @@ class SciMRCDataset(Dataset):
     def __getitem__(self, index):
         example = self.data[index]
         instruction = example['question'] + " Reply N.A. if the question is unanswerable."
-        input = example['input']
+        input = example['text']
         _id = example['id']
         answer = example['answer']
 
@@ -98,6 +99,8 @@ def evaluate(args, model, data_loader):
             output_ids = output_ids[:, len(input_ids[0]):]
             output = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
+            if "N.A." in output:
+                continue
             labels.extend(answers)
             predictions.extend(output)
 
@@ -132,12 +135,12 @@ if __name__ == '__main__':
     args.ddp = args.world_size != 1
 
     tokenizer = LlamaTokenizer.from_pretrained(args.model_path, add_eos_token=True)
-    tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
+    # tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
 
     model = prepare_model(args)
 
-    data = load_dataset("json", data_files=args.data_path)
-    data = data.select(range(len(data))[-4000:])
+    data = load_dataset("json", data_files=args.data_path)['train']
+    data = data.select(range(len(data))[-800:])
     test_dataset = SciMRCDataset(tokenizer, data)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
