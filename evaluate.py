@@ -48,7 +48,6 @@ class SciMRCDataset(Dataset):
 
 
 def prepare_model(args):
-
     device_map = "auto"
     if args.ddp:
         device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
@@ -74,13 +73,12 @@ def prepare_model(args):
     return model
 
 
-def compute_metrics(preds, labels):
+def compute_metrics_rouge(preds, labels):
     rouge = ROUGEScore()
     return rouge(preds, labels)
 
 
 def evaluate(args, model, data_loader):
-
     labels, predictions = [], []
     with torch.no_grad():
         for batch in tqdm(data_loader):
@@ -103,7 +101,7 @@ def evaluate(args, model, data_loader):
             labels.extend(answers)
             predictions.extend(output)
 
-    rouge_score = compute_metrics(predictions, labels)
+    rouge_score = compute_metrics_rouge(predictions, labels)
     print(rouge_score)
 
 
@@ -143,4 +141,3 @@ if __name__ == '__main__':
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
     evaluate(args, model, test_loader)
-

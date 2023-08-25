@@ -123,9 +123,11 @@ class SciMRCDataset(Dataset):
 
     def __getitem__(self, index):
         example = self.data[index]
-        input = example['input'][:8000]
+        input = example['text'][:8000]
         _id = example['id']
         summary = example['summary']
+        question = example['question']
+        answer = example['answer']
 
         # prompt = generate_prompt(instruction, input=input)
         prompt = "###Summarize the following academic paper: {paper} \n ###Summary:".format(paper=input)
@@ -133,7 +135,7 @@ class SciMRCDataset(Dataset):
                                 truncation=True, return_tensors="pt")
         input_ids = inputs['input_ids'][0]
 
-        return _id, input_ids, summary
+        return _id, input_ids, summary, question, answer
     
     def __len__(self):
         return len(self.data)
@@ -163,13 +165,15 @@ def predict(args, data_loader):
     outputs = []
     predictions, labels = [], []
     for batch in tqdm(data_loader):
-        _ids, input_ids, summaries = batch
+        _ids, input_ids, summaries, questions, answers = batch
         input_ids = input_ids.cuda()
         preds = evaluate(generation_config, model, input_ids)
-        for _id, pred in zip(_ids, preds):
+        for _id, pred, question, answer in zip(_ids, preds, questions, answers):
             outputs.append({
                 'id': _id,
-                'summary': pred
+                'summary': pred,
+                'question': question,
+                'answer': answer
             })
 
         labels.extend(summaries)

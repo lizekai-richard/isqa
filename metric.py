@@ -1,3 +1,4 @@
+import json
 import re
 import string
 from collections import Counter
@@ -8,11 +9,12 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 class FactualityMetric:
 
-    def __init__(self, model_name, prompt, device, max_length=512, max_new_tokens=100, min_new_tokens=10,
+    def __init__(self, model_name, prompt, save_path, device="cuda", max_length=512, max_new_tokens=100, min_new_tokens=10,
                  num_beams=2, repetition_penalty=1.3):
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=device)
+        self.save_path = save_path
         self.device = torch.device(device)
         self.prompt = prompt
         self.max_length = max_length
@@ -20,6 +22,7 @@ class FactualityMetric:
         self.min_new_tokens = min_new_tokens
         self.num_beams = num_beams
         self.repetition_penalty = repetition_penalty
+        self.predictions = []
 
     def compute_metrics(self, question, summary, answer):
 
@@ -44,6 +47,7 @@ class FactualityMetric:
         else:
             pred = self.tokenizer.decode(output_ids[0][len(input_ids):], skip_sepcial_tokens=True)
 
+        self.predictions.append(pred)
         f1, precision, recall = self.token_level_f1_score(pred, answer)
         return f1, precision, recall
 
@@ -83,6 +87,10 @@ class FactualityMetric:
         f1 = (2 * precision * recall) / (precision + recall)
         return f1, precision, recall
 
+    def save_predictions(self):
+        with open(self.save_path, "w") as f:
+            json.dump(self.predictions, f)
+
 
 if __name__ == '__main__':
 
@@ -91,23 +99,28 @@ if __name__ == '__main__':
         If the question is unanswerable, return "unanswerable" \n Answer:
     """
 
-    data_path = "../Data/SciMRC/processed_scimrc.json"
-    summary_path = "../ExperimentResults/summaries_after_tune.json"
+    data_path = "../ExperimentResults/summaries_after_tune.json"
 
     data = load_dataset("json", data_files=data_path)['train']
-    summaries = load_dataset("json", data_files=summary_path)['train']
-
-    example = summaries[0]
-    _id = example['id']
-    summary = example['summary']
-
-    for d in data:
-        if d['id'] == _id:
-            question = d['question']
-            answer = d['answer']
-            break
-
     metric = FactualityMetric("google/flan-t5-large", prompt, "mps")
-    score = metric.compute_metrics(question, summary, answer)
-    print(score)
+
+    tot_f1, tot_prec, tot_rec = 0.0, 0.0, 0.0
+    for example in data:
+        summary = example['summary']
+        question = example['question']
+        answer = example['answer']
+
+        f1, precision, reccall = metric.compute_metrics(question, summary, answer)
+
+        if f1 <= 0 or precision <= 0 or reccall <= 0:
+            continue
+
+        tot_f1 += f1
+        tot_prec += precision
+        tot_rec += reccall
+
+    avg_f1 = tot_f1 / len(data)
+    avg_prec = tot_prec / len(data)
+    avg_rec = tot_rec / len(data)
+    print({"f1": avg_f1, "precision": avg_prec, "recall": avg_rec})
 
