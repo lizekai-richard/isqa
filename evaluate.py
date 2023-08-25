@@ -93,7 +93,7 @@ def evaluate(args, model, data_loader):
                 top_p=args.top_p,
                 top_k=args.top_k,
                 num_beams=args.num_beams,
-                repetition_penalty=args.repitition_penalty
+                repetition_penalty=args.repetition_penalty
             )
 
             output_ids = output_ids[:, len(input_ids[0]):]
