@@ -122,6 +122,7 @@ if __name__ == '__main__':
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--repetition_penalty", type=float, default=1.3)
     parser.add_argument("--num_beams", type=int, default=1)
+    parser.add_argument("--use_8bit", type=bool, default=True)
     args = parser.parse_args()
 
     if not args.wandb:
