@@ -1,5 +1,6 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
+import re
 from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -26,22 +27,24 @@ class SciMRCDataset(Dataset):
 
     def __getitem__(self, index):
         example = self.data[index]
-        instruction = example['instruction']
-        input = example['input']
-        answer = example['output']
+        example = self.data[index]
+        instruction = example['question']
+        input_text = example['text'][:7000]
+        answer = example['answer']
 
         # instruction = example['question'] + " Reply N.A. if the question is unanswerable."
         # input = example['text'][:8000]
         # answer = example['answer']
 
         # prompt = generate_prompt(instruction, input=input)
-        prompt = f"""Below is an instruction that describes a task, paired with an input that provides further context. 
-            Write a response that appropriately completes the request.
-            ### Instruction:{instruction}
+        prompt = """Below is an instruction that describes a task, paired with an input that provides further context. 
+            Write a response that appropriately completes the request. Return 'unanswerable' if you can't answer the question."
+            ### Instruction:{inst}
             ### Input:{input}
-            ### Response:
+            ### Response: 
         """
-        inputs = self.tokenizer(prompt, max_length=2048, padding='max_length',
+        inputs = self.tokenizer(prompt.format(inst=instruction, input=input_text), 
+                                max_length=2048, padding='max_length',
                                 truncation=True, return_tensors="pt")
         input_ids = inputs['input_ids'][0]
 
@@ -77,9 +80,16 @@ def prepare_model(args):
     return model
 
 
-def compute_metrics_rouge(preds, labels):
+def compute_metrics(preds, labels):
     rouge = ROUGEScore()
-    return rouge(preds, labels)
+    trimmed_preds, trimmed_labels = [], []
+    for pred, label in zip(preds, labels):
+        if "unanswerable" in pred:
+            continue
+        pred = re.sub(r"\n", "", pred)
+        trimmed_preds.append(pred)
+        trimmed_labels.append(label)
+    return rouge(trimmed_preds, trimmed_labels)
 
 
 def evaluate(args, model, data_loader):
@@ -105,7 +115,7 @@ def evaluate(args, model, data_loader):
             labels.extend(answers)
             predictions.extend(output)
 
-    rouge_score = compute_metrics_rouge(predictions, labels)
+    rouge_score = compute_metrics(predictions, labels)
     print(rouge_score)
 
 
@@ -135,14 +145,14 @@ if __name__ == '__main__':
     args.world_size = int(os.environ.get("WORLD_SIZE", 1))
     args.ddp = args.world_size != 1
 
-    tokenizer = LlamaTokenizer.from_pretrained(args.model_path, add_eos_token=True)
+    tokenizer = LlamaTokenizer.from_pretrained(args.model_path)
     tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
     tokenizer.padding_side = "left"
 
     model = prepare_model(args)
 
     data = load_dataset("json", data_files=args.data_path)['train']
-    data = data.select(range(len(data))[-4000:])
+    data = data.select(range(len(data))[-800:])
     test_dataset = SciMRCDataset(tokenizer, data)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
