@@ -123,7 +123,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--test_size", type=int, default=100)
     parser.add_argument("--dataset", type=str)
-    parser.add_argument("--prompt", type=str, default="Answer the question: {qn}\n Based on the following document: {doc}\n, ")
+    parser.add_argument("--prompt", type=str, default="Answer the question: {qn}\n Based on the following document: {doc}\n")
     args = parser.parse_args()
 
     # Reset default repetition penalty for T5 models.

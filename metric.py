@@ -1,7 +1,10 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 import json
 import re
 import string
 from collections import Counter
+from tqdm import tqdm
 import torch
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
@@ -9,11 +12,11 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 class FactualityMetric:
 
-    def __init__(self, model_name, prompt, save_path, device="cuda", max_length=512, max_new_tokens=100, min_new_tokens=10,
+    def __init__(self, model_name, prompt, save_path, device="cuda:0", max_length=512, max_new_tokens=100, min_new_tokens=1,
                  num_beams=2, repetition_penalty=1.3):
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map=device)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
         self.save_path = save_path
         self.device = torch.device(device)
         self.prompt = prompt
@@ -67,8 +70,11 @@ class FactualityMetric:
 
         def lower(text):
             return text.lower()
+        
+        def remove_special_tokens(text):
+            return re.sub(r'<pad>|<\\s>', '', text)
 
-        return white_space_fix(remove_redundant_whitespace(remove_articles(remove_punc(lower(s)))))
+        return white_space_fix(remove_redundant_whitespace(remove_articles(remove_punc(remove_special_tokens(lower(s))))))
 
     def token_level_f1_score(self, pred, label):
         normalized_pred, normalized_label = self.normalize_answer(pred), self.normalize_answer(label)
@@ -99,14 +105,17 @@ if __name__ == '__main__':
         If the question is unanswerable, return "unanswerable" \n Answer:
     """
 
-    data_path = "../ExperimentResults/summaries_after_tune.json"
+    data_path = "/mnt/data/zekai/summaries_before_tune.json"
 
     data = load_dataset("json", data_files=data_path)['train']
-    metric = FactualityMetric("google/flan-t5-large", prompt, "mps")
+    metric = FactualityMetric("google/flan-t5-large", prompt, "qa_metric_result_000.json",
+                              device="cuda:0")
 
     tot_f1, tot_prec, tot_rec = 0.0, 0.0, 0.0
-    for example in data:
+    cnt = 0
+    for example in tqdm(data):
         summary = example['summary']
+        summary = re.sub(r"\n|\*", "", summary)
         question = example['question']
         answer = example['answer']
 
@@ -119,8 +128,12 @@ if __name__ == '__main__':
         tot_prec += precision
         tot_rec += reccall
 
-    avg_f1 = tot_f1 / len(data)
-    avg_prec = tot_prec / len(data)
-    avg_rec = tot_rec / len(data)
+        cnt += 1
+
+    avg_f1 = tot_f1 / cnt
+    avg_prec = tot_prec / cnt
+    avg_rec = tot_rec / cnt
     print({"f1": avg_f1, "precision": avg_prec, "recall": avg_rec})
+
+    metric.save_predictions()
 

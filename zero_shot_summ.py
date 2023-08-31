@@ -5,6 +5,8 @@ Usage:
 python3 -m fastchat.serve.huggingface_api --model lmsys/vicuna-7b-v1.3
 python3 -m fastchat.serve.huggingface_api --model lmsys/fastchat-t5-3b-v1.0
 """
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 import argparse
 import json
 from tqdm import tqdm
@@ -16,10 +18,9 @@ from datasets import load_dataset
 from fastchat.model import load_model, get_conversation_template, add_model_args
 
 
-def save_preds(pred_summary):
-    with open("val_preds_scimrc.txt", "w") as f:
-        for summary in pred_summary:
-            f.write(summary + "\n")
+def save_preds(saved_result):
+    with open("summary_before_tune.json", "w") as f:
+        json.dump(saved_result, f)
 
 def compute_metrics(eval_pred):
     preds, labels = eval_pred
@@ -37,6 +38,7 @@ def inference(args, model, tokenizer, prompt):
         temperature=args.temperature,
         repetition_penalty=args.repetition_penalty,
         max_new_tokens=args.max_new_tokens,
+        min_new_tokens=args.min_new_tokens
     )
 
     if model.config.is_encoder_decoder:
@@ -54,7 +56,8 @@ if __name__ == "__main__":
     add_model_args(parser)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--repetition_penalty", type=float, default=1.0)
-    parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--max_new_tokens", type=int, default=512)
+    parser.add_argument("--min_new_tokens", type=int, default=1)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--test_size", type=int, default=100)
     parser.add_argument("--prompt", type=str, default="Please summarize the following scientific paper: {text}")
@@ -65,7 +68,7 @@ if __name__ == "__main__":
         args.repetition_penalty = 1.2
 
     dataset = load_dataset("json", 
-                           data_files="/home/zekai/llm_mrc_summ/results/data/processed_scimrc.json")['train']
+                           data_files="/mnt/data/zekai/processed_scimrc.json")['train']
 
     model, tokenizer = load_model(
         args.model_path,
@@ -79,10 +82,13 @@ if __name__ == "__main__":
     )
 
     ref_summaries, pred_summaries = [], []
+    saved_result = []
     for i in tqdm(range(args.test_size)):
         example = dataset[i]
         summary = example['summary']
-        paper = example['text'][:10000]
+        paper = example['text'][:8000]
+        question = example['question']
+        answer = example['answer']
         msg = args.prompt.format(text=paper)
 
         conv = get_conversation_template(args.model_path)
@@ -95,8 +101,14 @@ if __name__ == "__main__":
         ref_summaries.append(summary)
         pred_summaries.append(pred)
 
+        saved_result.append({
+            'summary': pred,
+            'question': question,
+            'answer': answer
+        })
+
     metrics = compute_metrics((pred_summaries, ref_summaries))
-    save_preds(pred_summaries)
+    save_preds(saved_result)
     print(metrics)
 
 

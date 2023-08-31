@@ -1,3 +1,5 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="2"
 import sys
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -9,7 +11,6 @@ from torchmetrics.text.rouge import ROUGEScore
 import argparse
 import warnings
 from datasets import load_dataset
-import os
 from inference_helper import StreamPeftGenerationMixin, StreamLlamaForCausalLM
 assert (
     "LlamaTokenizer" in transformers._import_structure["models.llama"]
@@ -187,10 +188,10 @@ def predict(args, data_loader):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb", default=False)
-    parser.add_argument("--data_path", type=str, default="merge.json")
+    parser.add_argument("--data_path", type=str, default="/path/to/data")
+    parser.add_argument("--save_path", type=str, default="/path/to/save")
     parser.add_argument("--output_path", type=str, default="lora-Vicuna")
     parser.add_argument("--model_path", type=str, default="decapoda-research/llama-7b-hf")
-    parser.add_argument("--test_size", type=int, default=200)
     parser.add_argument("--resume_from_checkpoint", type=str, default=None)
     parser.add_argument("--lora_remote_checkpoint", type=str, default=None)
     parser.add_argument("--ignore_data_skip", type=str, default="False")
@@ -223,5 +224,5 @@ if __name__ == '__main__':
 
     outputs = predict(args, data_loader)
 
-    with open('summaries_after_tune.json', 'w') as f:
+    with open(args.save_path, 'w') as f:
         json.dump(outputs, f)

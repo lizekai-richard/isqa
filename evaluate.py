@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -26,10 +26,13 @@ class SciMRCDataset(Dataset):
 
     def __getitem__(self, index):
         example = self.data[index]
-        instruction = example['instruction'] + " Reply N.A. if the question is unanswerable."
+        instruction = example['instruction']
         input = example['input']
-        # _id = example['id']
         answer = example['output']
+
+        # instruction = example['question'] + " Reply N.A. if the question is unanswerable."
+        # input = example['text'][:8000]
+        # answer = example['answer']
 
         # prompt = generate_prompt(instruction, input=input)
         prompt = f"""Below is an instruction that describes a task, paired with an input that provides further context. 
@@ -99,8 +102,6 @@ def evaluate(args, model, data_loader):
             output_ids = output_ids[:, len(input_ids[0]):]
             output = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
-            if "N.A." in output:
-                continue
             labels.extend(answers)
             predictions.extend(output)
 
@@ -118,8 +119,8 @@ if __name__ == '__main__':
     parser.add_argument("--lora_remote_checkpoint", type=str, default=None)
     parser.add_argument("--ignore_data_skip", type=str, default="False")
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--max_new_tokens", type=int, default=100)
-    parser.add_argument("--min_new_tokens", type=int, default=200)
+    parser.add_argument("--max_new_tokens", type=int, default=200)
+    parser.add_argument("--min_new_tokens", type=int, default=10)
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--top_k", type=float, default=50)
     parser.add_argument("--temperature", type=float, default=1.0)
@@ -134,8 +135,9 @@ if __name__ == '__main__':
     args.world_size = int(os.environ.get("WORLD_SIZE", 1))
     args.ddp = args.world_size != 1
 
-    tokenizer = LlamaTokenizer.from_pretrained(args.model_path, add_eos_token=True, padding_side='left')
+    tokenizer = LlamaTokenizer.from_pretrained(args.model_path, add_eos_token=True)
     tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
+    tokenizer.padding_side = "left"
 
     model = prepare_model(args)
 
