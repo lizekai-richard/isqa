@@ -1,8 +1,9 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="2"
 import json
 import re
 import string
+from argparse import ArgumentParser
 from utils.preprocessing import process_example
 from collections import Counter
 from tqdm import tqdm
@@ -14,21 +15,20 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 class FactualityMetric:
 
-    def __init__(self, model_name, metrics_name, prompt, save_path, device="cuda:0", max_length=512, max_new_tokens=100, min_new_tokens=1,
-                 num_beams=2, repetition_penalty=1.3):
+    def __init__(self, args):
         
-        self.metrics_name = metrics_name
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
-        self.save_path = save_path
-        self.device = torch.device(device)
-        self.prompt = prompt
-        self.max_length = max_length
-        self.max_new_tokens = max_new_tokens
-        self.min_new_tokens = min_new_tokens
-        self.num_beams = num_beams
-        self.repetition_penalty = repetition_penalty
-        self.predictions = []
+        self.metrics_name = args.metrics_name
+        self.tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, device_map="auto")
+        self.save_path = args.save_path
+        # self.device = torch.device(args.device)
+        self.prompt = args.prompt
+        self.max_length = args.max_length
+        self.max_new_tokens = args.max_new_tokens
+        self.min_new_tokens = args.min_new_tokens
+        self.num_beams = args.num_beams
+        self.repetition_penalty = args.repetition_penalty
+        self.saved_results = []
 
     def compute_metrics(self, question, summary, answer):
 
@@ -39,7 +39,7 @@ class FactualityMetric:
             padding='max_length',
             truncation=True,
             return_tensors='pt'
-        ).input_ids.to(self.device)
+        ).input_ids.cuda()
 
         output_ids = self.model.generate(
             input_ids,
@@ -53,7 +53,11 @@ class FactualityMetric:
         else:
             pred = self.tokenizer.decode(output_ids[0][len(input_ids):], skip_sepcial_tokens=True)
 
-        self.predictions.append(pred)
+        self.saved_results.append({
+            'prediction': pred,
+            'label': answer
+        })
+
         metrics = {}
         if self.metrics_name == 'f1':
             f1, precision, recall = self.token_level_f1_score(pred, answer)
@@ -122,21 +126,12 @@ class FactualityMetric:
 
     def save_predictions(self):
         with open(self.save_path, "w") as f:
-            json.dump(self.predictions, f)
+            json.dump(self.saved_results, f)
 
 
-if __name__ == '__main__':
-
-    prompt = """
-        Read the context: {context} \n Answer the question: {question}. 
-        If the question is unanswerable, return "unanswerable" \n Answer:
-    """
-
-    data_path = "/mnt/data/zekai/summaries_after_tune_1200.json"
-
-    data = load_dataset("json", data_files=data_path)['train']
-    metric = FactualityMetric("google/flan-t5-large", "rouge", prompt, "qa_metric_result_1200.json",
-                              device="cuda:0")
+def compute_from_summary(args):
+    data = load_dataset("json", data_files=args.data_path)['train']
+    metric = FactualityMetric(args)
 
     tot_f1, tot_prec, tot_rec = 0.0, 0.0, 0.0
     tot_rouge1, tot_rouge2, tot_rougeL = 0.0, 0.0, 0.0
@@ -176,6 +171,35 @@ if __name__ == '__main__':
         avg_rouge2 = tot_rouge2 / cnt
         avg_rougeL = tot_rougeL / cnt
         print({'rouge1': avg_rouge1, 'rouge2': avg_rouge2, 'rougeL': avg_rougeL})
+    
+    metric.save_predictions()
 
-    # metric.save_predictions()
+
+
+if __name__ == '__main__':
+
+    parser = ArgumentParser()
+    parser.add_argument("--model_name", type=str, default="/path/to/model")
+    parser.add_argument("--data_path", type=str, default="/path/to/data")
+    parser.add_argument("--save_path", type=str, default="/path/to/save")
+    parser.add_argument("--qa_result_path", type=str, default=None)
+    parser.add_argument("--metrics_name", type=str, default="f1")
+    parser.add_argument("--prompt", type=str)
+    parser.add_argument("--max_length", type=int, default=512)
+    parser.add_argument("--num_beams", type=int, default=2)
+    parser.add_argument("--repetition_penalty", type=float, default=1.3)
+    parser.add_argument("--max_new_tokens", type=int, default=100)
+    parser.add_argument("--min_new_tokens", type=int, default=1)
+
+    args = parser.parse_args()
+
+    args.prompt = """
+        Read the context: {context} \n Answer the question: {question}. 
+        If the question is unanswerable, return "unanswerable" \n Answer:
+    """
+
+    if args.qa_result_path is None:
+        compute_from_summary(args)
+
+    
 
