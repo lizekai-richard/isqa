@@ -5,11 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="8b46bde0-9d80-4e59-b86f-5934bfec1135" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/scripts/inference.sh" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/utils/scimrc_stat.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/evaluate.py" beforeDir="false" afterPath="$PROJECT_DIR$/evaluate.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/inference.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/metric.py" beforeDir="false" afterPath="$PROJECT_DIR$/metric.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/finetune.py" beforeDir="false" afterPath="$PROJECT_DIR$/finetune.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/process_scimrc.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/process_scimrc.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -101,6 +100,9 @@
       <workItem from="1692669873344" duration="6732000" />
       <workItem from="1692780254031" duration="1295000" />
       <workItem from="1692937304632" duration="3049000" />
+      <workItem from="1694435839441" duration="142000" />
+      <workItem from="1694506813679" duration="1218000" />
+      <workItem from="1694659217260" duration="4303000" />
     </task>
     <servers />
   </component>

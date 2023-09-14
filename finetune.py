@@ -28,6 +28,47 @@ tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos tok
 # tokenizer.padding_side = "left"  # Allow batched inference
 
 
+def generate_prompt_for_mrc(data_point):
+    user_prompt = """Below is a question paired with its context, please return the answer and \
+    the most relevant evidence in the format of: (Answer: ### Evidence:). If the question is unanswerable, \
+    directly return 'unanswerable' \
+    ###Question: {question} \
+    ###Context: {context} \
+    ###Response: """.format(question=data_point['question'], context=data_point['context'])
+
+    len_user_prompt_tokens = (
+            len(
+                tokenizer(
+                    user_prompt,
+                    truncation=True,
+                    max_length=args.max_length,
+                )["input_ids"]
+            )
+            - 1
+    )  # no eos token
+    if data_point['unanswerable']:
+        full_tokens = tokenizer(
+            user_prompt + "unanswerable",
+            truncation=True,
+            max_length=args.max_length,
+            padding="max_length",
+        )["input_ids"][:-1]
+    else:
+        full_tokens = tokenizer(
+            user_prompt + "(Answer:{answer} ### Evidence:{evidence})".format(answer=data_point["answer"],
+                                                                             evidence=data_point['suppporting_fact']),
+            truncation=True,
+            max_length=args.max_length,
+            padding="max_length",
+        )["input_ids"][:-1]
+    return {
+        "input_ids": full_tokens,
+        "labels": [-100] * len_user_prompt_tokens + full_tokens[len_user_prompt_tokens:],
+        "attention_mask": [1] * (len(full_tokens)),
+    }
+
+
+
 def generate_and_tokenize_prompt(data_point):
     # This function masks out the labels for the input,
     # so that our loss is computed only on the response.
@@ -86,10 +127,10 @@ def prepare_data(args):
         train_val = data["train"].train_test_split(
             test_size=args.test_size, shuffle=True, seed=42
         )
-        train_data = train_val["train"].shuffle().map(generate_and_tokenize_prompt)
-        val_data = train_val["test"].shuffle().map(generate_and_tokenize_prompt)
+        train_data = train_val["train"].shuffle().map(generate_prompt_for_mrc)
+        val_data = train_val["test"].shuffle().map(generate_prompt_for_mrc)
     else:
-        train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
+        train_data = data["train"].shuffle().map(generate_prompt_for_mrc)
         val_data = None
 
     return train_data, val_data
@@ -98,6 +139,7 @@ def prepare_data(args):
 def prepare_model(args):
     target_modules = [
         "q_proj",
+        "k_proj",
         "v_proj",
     ]
 
@@ -229,9 +271,9 @@ def train(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb", default=False)
-    parser.add_argument("--data_path", type=str, default="merge.json")
-    parser.add_argument("--output_path", type=str, default="lora-Vicuna")
-    parser.add_argument("--model_path", type=str, default="decapoda-research/llama-7b-hf")
+    parser.add_argument("--data_path", type=str, default="/path/to/data")
+    parser.add_argument("--output_path", type=str, default="/path/to/output")
+    parser.add_argument("--model_path", type=str, default="/path/to/model")
     parser.add_argument("--eval_steps", type=int, default=200)
     parser.add_argument("--save_steps", type=int, default=200)
     parser.add_argument("--test_size", type=int, default=200)
