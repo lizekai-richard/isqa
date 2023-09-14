@@ -1,6 +1,6 @@
 import os
 import sys
-
+os.environ["TORCH_DISTRIBUTED_DEBUG"]="DETAIL"
 import torch
 import torch.nn as nn
 import bitsandbytes as bnb
@@ -23,7 +23,7 @@ from peft import (
     set_peft_model_state_dict,
 )
 
-tokenizer = LlamaTokenizer.from_pretrained("../llm_weights/vicuna-7b-v1.3", add_eos_token=True)
+tokenizer = LlamaTokenizer.from_pretrained("/mnt/data/zekai/vicuna_7b", add_eos_token=True)
 tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
 # tokenizer.padding_side = "left"  # Allow batched inference
 
@@ -34,7 +34,7 @@ def generate_prompt_for_mrc(data_point):
     directly return 'unanswerable' \
     ###Question: {question} \
     ###Context: {context} \
-    ###Response: """.format(question=data_point['question'], context=data_point['context'])
+    ###Response: """.format(question=data_point['question'], context=data_point['evidence'])
 
     len_user_prompt_tokens = (
             len(
@@ -56,7 +56,7 @@ def generate_prompt_for_mrc(data_point):
     else:
         full_tokens = tokenizer(
             user_prompt + "(Answer:{answer} ### Evidence:{evidence})".format(answer=data_point["answer"],
-                                                                             evidence=data_point['suppporting_fact']),
+                                                                             evidence=data_point['supporting_fact']),
             truncation=True,
             max_length=args.max_length,
             padding="max_length",
@@ -139,7 +139,7 @@ def prepare_data(args):
 def prepare_model(args):
     target_modules = [
         "q_proj",
-        "k_proj",
+        # "k_proj",
         "v_proj",
     ]
 
@@ -289,7 +289,6 @@ if __name__ == '__main__':
     parser.add_argument("--lora_r", type=int, default=8)
     parser.add_argument("--lora_alpha", type=int, default=16)
     parser.add_argument("--lora_dropout", type=int, default=0.5)
-    parser.add_argument("--test_size", type=int, default=800)
     parser.add_argument("--use_8bit", type=bool, default=True)
     args = parser.parse_args()
 
