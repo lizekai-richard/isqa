@@ -1,25 +1,16 @@
+import json
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
-import re
-from tqdm import tqdm
+os.environ['CUDA_VISIBLE_DEVICES']='1'
 import torch
-from torch.utils.data import Dataset, DataLoader
-from datasets import load_dataset
-import transformers
 import argparse
-import warnings
-from peft import PeftModel
-from torchmetrics.text.rouge import ROUGEScore
-
-assert (
-        "LlamaTokenizer" in transformers._import_structure["models.llama"]
-), "LLaMA is now in HuggingFace's main branch.\nPlease reinstall it: pip uninstall transformers && pip install " \
-   "git+https://github.com/huggingface/transformers.git"
+from tqdm import tqdm
+from datasets import load_dataset
+from torch.utils.data import Dataset, DataLoader
 from transformers import LlamaForCausalLM, LlamaTokenizer
-from peft import prepare_model_for_int8_training
+from peft import PeftModel
 
 
-class SciMRCDataset(Dataset):
+class EvalDataset(Dataset):
     def __init__(self, tokenizer, data):
         super().__init__()
         self.tokenizer = tokenizer
@@ -27,38 +18,30 @@ class SciMRCDataset(Dataset):
 
     def __getitem__(self, index):
         example = self.data[index]
-        example = self.data[index]
-        instruction = example['question']
-        input_text = example['text'][:7000]
+        question = example['question']
+        context = example['evidence']
         answer = example['answer']
+        supporting_fact = example['supporting_fact']
 
-        # instruction = example['question'] + " Reply N.A. if the question is unanswerable."
-        # input = example['text'][:8000]
-        # answer = example['answer']
-
-        # prompt = generate_prompt(instruction, input=input)
-        prompt = """Below is an instruction that describes a task, paired with an input that provides further context. 
-            Write a response that appropriately completes the request. Return 'unanswerable' if you can't answer the question."
-            ### Instruction:{inst}
-            ### Input:{input}
-            ### Response: 
-        """
-        inputs = self.tokenizer(prompt.format(inst=instruction, input=input_text), 
-                                max_length=2048, padding='max_length',
+        prompt = """Below is a question paired with its context, please return the answer and \
+        the most relevant evidence in the format of: (Answer: ### Evidence:). If the question is unanswerable, \
+        directly return 'unanswerable' \
+        ###Question: {question} \
+        ###Context: {context} \
+        ###Response: """
+        inputs = self.tokenizer(prompt.format(question=question, input=context),
+                                max_length=512, padding='max_length',
                                 truncation=True, return_tensors="pt")
         input_ids = inputs['input_ids'][0]
 
-        return input_ids, answer
+        return input_ids, answer, supporting_fact
 
     def __len__(self):
         return len(self.data)
 
 
-def prepare_model(args):
+def load_model(args):
     device_map = "auto"
-    if args.ddp:
-        device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
-        args.gradient_accumulation_steps = args.gradient_accumulation_steps // args.world_size
     print(args.model_path)
 
     model = LlamaForCausalLM.from_pretrained(
@@ -69,34 +52,15 @@ def prepare_model(args):
     print(args.lora_path)
     model = PeftModel.from_pretrained(model, args.lora_path)
 
-    if args.use_8bit is True:
-        warnings.warn(
-            "If your version of bitsandbytes>0.37.2, Please downgrade bitsandbytes's version, for example: "
-            "pip install bitsandbytes==0.37.2"
-        )
-        model = prepare_model_for_int8_training(model)
-
     model.eval()
     return model
 
 
-def compute_metrics(preds, labels):
-    rouge = ROUGEScore()
-    trimmed_preds, trimmed_labels = [], []
-    for pred, label in zip(preds, labels):
-        if "unanswerable" in pred:
-            continue
-        pred = re.sub(r"\n", "", pred)
-        trimmed_preds.append(pred)
-        trimmed_labels.append(label)
-    return rouge(trimmed_preds, trimmed_labels)
-
-
-def evaluate(args, model, data_loader):
-    labels, predictions = [], []
+def evaluate(args, model, tokenizer, data_loader):
+    saved_results = []
     with torch.no_grad():
         for batch in tqdm(data_loader):
-            input_ids, answers = batch
+            input_ids, answers, supporting_facts = batch
             input_ids = input_ids.cuda()
 
             output_ids = model.generate(
@@ -110,19 +74,26 @@ def evaluate(args, model, data_loader):
             )
 
             output_ids = output_ids[:, len(input_ids[0]):]
-            output = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+            outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
-            labels.extend(answers)
-            predictions.extend(output)
+            for i in range(len(outputs)):
+                output = outputs[i]
+                answer = answers[i]
+                supporting_fact = supporting_facts[i]
+                saved_results.append({
+                    'prediction': output,
+                    'answer': answer,
+                    'supporting_fact': supporting_fact
+                })
 
-    rouge_score = compute_metrics(predictions, labels)
-    print(rouge_score)
+    return saved_results
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb", default=False)
     parser.add_argument("--data_path", type=str, default="/path/to/data")
+    parser.add_argument("--output_path", type=str, default="/path/to/output")
     parser.add_argument("--model_path", type=str, default="/path/to/model")
     parser.add_argument("--lora_path", type=str, default="/path/to/lora")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None)
@@ -148,11 +119,13 @@ if __name__ == '__main__':
     tokenizer = LlamaTokenizer.from_pretrained(args.model_path)
     tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos token
 
-    model = prepare_model(args)
+    model = load_model(args)
 
     data = load_dataset("json", data_files=args.data_path)['train']
-    data = data.select(range(len(data))[-800:])
-    test_dataset = SciMRCDataset(tokenizer, data)
+    test_dataset = EvalDataset(tokenizer, data)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-    evaluate(args, model, test_loader)
+    predictions = evaluate(args, model, tokenizer, test_loader)
+
+    with open(args.output_path, "w") as f:
+        json.dump(predictions, f)
