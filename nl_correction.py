@@ -1,12 +1,16 @@
 import json
 import os
-import sys
+os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
+import re
+import string
 import torch
+from collections import Counter
 from tqdm import tqdm
 from torch.utils.data import Dataset
 import bitsandbytes as bnb
 from datasets import load_dataset
 from transformers import LlamaTokenizer, LlamaForCausalLM
+from peft import PeftModel, prepare_model_for_int8_training
 import argparse
 from inference_helper import StreamPeftGenerationMixin
 
@@ -20,7 +24,7 @@ class SciMRCDataset(Dataset):
 
     def __getitem__(self, index):
         example = self.data[index]
-        input = example['text'][:8000]
+        input = example['text'][:6000]
         _id = example['id']
         summary = example['summary']
         question = example['question']
@@ -40,11 +44,15 @@ class SciMRCDataset(Dataset):
 
 def load_base_model(args):
     tokenizer = LlamaTokenizer.from_pretrained(args.model_path)
+    tokenizer.pad_token_id = 0
+
     model = LlamaForCausalLM.from_pretrained(
         args.model_path,
         load_in_8bit=args.use_8bit,
-        device_map="auto",
+        torch_dtype=torch.float16,
+        device_map='auto'
     )
+    model = prepare_model_for_int8_training(model)
     return tokenizer, model
 
 
@@ -54,22 +62,61 @@ def load_feedback_model(args):
         load_in_8bit=args.use_8bit,
         device_map='auto'
     )
-    model = StreamPeftGenerationMixin.from_pretrained(
+    model = PeftModel.from_pretrained(
         base_model,
         args.lora_path,
-        torch_dtype=torch.float16,
-        device_map="auto",
+        device_map="auto"
     )
+    model = prepare_model_for_int8_training(model)
     return model
 
 
+def normalize_answer(self, s):
+    def remove_redundant_whitespace(text):
+        return text.strip()
+
+    def remove_articles(text):
+        return re.sub(r'\b(a|an|the)\b', ' ', text)
+
+    def white_space_fix(text):
+        return ' '.join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        return ''.join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+    
+    def remove_special_tokens(text):
+        return re.sub(r'\\u2194', ' ', text)
+
+    return white_space_fix(remove_redundant_whitespace(remove_articles(remove_punc(remove_special_tokens(lower(s))))))
+
+def token_level_f1_score(pred, label):
+    normalized_pred, normalized_label = normalize_answer(pred), normalize_answer(label)
+    
+    prediction_tokens = normalized_pred.split()
+    ground_truth_tokens = normalized_label.split()
+    
+    common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0, 0, 0
+    precision = 1.0 * num_same / len(prediction_tokens)
+    recall = 1.0 * num_same / len(ground_truth_tokens)
+    f1 = (2 * precision * recall) / (precision + recall)
+    return f1
+
+
 def generate_prompt_for_feedback_model(summary, question):
-    prompt = """Below is a question paired with its context, please return the answer and \
-    the most relevant evidence in the format of: (Answer: ### Evidence:). If the question is unanswerable, \
-    directly return 'unanswerable' \
-    ###Question: {question} \
-    ###Context: {context} \
-    ###Response: """.format(question=question, context=summary)
+    prompt = """Below is a question paired with its context, please return your response in two parts:
+1. the answer to the question 2. the most relevant evidence in the context to answer the question. 
+If the question is unanswerable, directly return 'unanswerable'.
+###Question: {question}
+###Context: {context}
+###Response: """.format(question=question, context=summary)
+    
     return prompt
 
 
@@ -94,15 +141,21 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
     output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                               clean_up_tokenization_spaces=True)
 
-    if "unanswerable" in output:
+    if "unanswerable" or "Unanswerable" in output:
         return None, 0
 
-    answer, evidence = "", ""
-    if "###" in output:
-        answer, evidence = output.split("###")
+    prediction = output.split("\n")
+    if len(prediction) == 2:
+        pred_ans, pred_sp = prediction[0], prediction[1]
+        if "Answer:" in pred_ans and "Evidence:" in pred_sp:
+            ans_index = pred_ans.find("Answer:")
+            sp_index = pred_sp.find("Evidence:")
+            feedback_ans = pred_ans[ans_index + len("Answer:"):]
+            feedback_sp = pred_sp[sp_index + len("Evidence:"):]
 
+            return feedback_sp, token_level_f1_score(feedback_ans, answer)
     else:
-        pass
+        return None, 0
 
 
 def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
@@ -165,7 +218,7 @@ def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
     tot_cnt = 0
     with torch.no_grad():
         for example in tqdm(dataset):
-            _id = example['_id']
+            _id = example['id']
             text = example['text']
             qa_pairs = example['qa_pairs']
             gold_summary = example['summary']
@@ -241,6 +294,7 @@ if __name__ == '__main__':
     parser.add_argument("--gen_min_new_tokens", type=int, default=1)
     parser.add_argument("--gen_max_new_tokens", type=int, default=200)
     parser.add_argument("--num_beams", type=int, default=2)
+    parser.add_argument("--temperature", type=int, default=1.3)
     parser.add_argument("--use_8bit", type=bool, default=True)
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--patience", type=float, default=0.01)
@@ -249,7 +303,7 @@ if __name__ == '__main__':
     tokenizer, base_model = load_base_model(args)
     feedback_model = load_feedback_model(args)
 
-    dataset = load_dataset("json", data_files=args.data_path)
+    dataset = load_dataset("json", data_files=args.data_path)['train']
     results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset)
 
     with open(args.save_path, "w") as f:
