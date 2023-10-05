@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES']='1'
+os.environ['CUDA_VISIBLE_DEVICES']='3'
 import sys
 import torch
 import torch.nn as nn
@@ -14,14 +14,13 @@ from peft import PeftModel
 
 
 feedback_data = load_dataset("json", data_files="/mnt/data/zekai/feedback_data.json")['train']
-example = feedback_data[21]
-
-prompt = """Below is a question paired with its context, please return the answer and \
-    the most relevant evidence in the format of: (Answer: ### Evidence:). If the question is unanswerable, \
-    directly return 'unanswerable' \
-    ###Question: {question} \
-    ###Context: {context} \
-    ###Response: """.format(question=example['question'], context=example['evidence'])
+example = feedback_data[1287]
+prompt = """Below is a question paired with its context, please return your response in two parts:
+1. the answer to the question 2. the most relevant evidence in the context to answer the question. 
+If the question is unanswerable, directly return 'unanswerable'.
+###Question: {question}
+###Context: {context}
+###Response: """.format(question=example['question'], context=example['evidence'])
 
 
 tokenizer = LlamaTokenizer.from_pretrained("/mnt/data/zekai/vicuna_7b")
