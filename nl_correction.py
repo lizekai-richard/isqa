@@ -262,26 +262,23 @@ def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
                 feedback_dict = feedback_step(args, tokenizer, feedback_model, pred_summary, question, answer)
                 if feedback_dict is None:
                     continue
-
-                # results_to_save[_id].append({'output': pred_summary, 'f1-score': feedback_dict['score']})
-                saved_dict = {
-                    'output': pred_summary, 
-                    # 'fact': feedback_dict['fact'],
-                    'f1-score': feedback_dict['score']
-                }
                 max_score_for_cur_example = max(max_score_for_cur_example, feedback_dict['score'])
 
                 if "fact" in feedback_dict:
                     feedback['facts'].append(feedback_dict['fact'])
-                    saved_dict['fact'] = feedback_dict['fact']
-                # elif "non_fact" in feedback_dict:
-                #     feedback['non_facts'].append(feedback_dict['non_fact'])
-                    # results_to_save[_id].append({
-                    #     'output': pred_summary, 
-                    #     'non_fact': feedback_dict['non_fact'],
-                    #     'f1-score': feedback_dict['score']
-                    # })
-                results_to_save[_id].append(saved_dict)
+                    results_to_save[_id].append({
+                        'output': pred_summary, 
+                        'fact': feedback_dict['fact'],
+                        'f1-score': feedback_dict['score']
+                    })
+                elif "non_fact" in feedback_dict:
+                    feedback['non_facts'].append(feedback_dict['non_fact'])
+                    results_to_save[_id].append({
+                        'output': pred_summary, 
+                        'non_fact': feedback_dict['non_fact'],
+                        'f1-score': feedback_dict['score']
+                    })
+
                 pred_summary = refine_step(args, tokenizer, base_model, text, feedback)
 
             if max_score_for_cur_example > 0:
