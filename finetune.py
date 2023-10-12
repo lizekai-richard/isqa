@@ -1,6 +1,5 @@
 import os
 import sys
-os.environ["TORCH_DISTRIBUTED_DEBUG"]="DETAIL"
 import torch
 import torch.nn as nn
 import bitsandbytes as bnb
@@ -9,6 +8,8 @@ import transformers
 import argparse
 import warnings
 from huggingface_hub import snapshot_download
+from transformers.trainer_callback import TrainerCallback
+from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
 assert (
         "LlamaTokenizer" in transformers._import_structure["models.llama"]
@@ -28,10 +29,25 @@ tokenizer.pad_token_id = 0  # unk. we want this to be different from the eos tok
 # tokenizer.padding_side = "left"  # Allow batched inference
 
 
+class PeftSavingCallback(TrainerCallback):
+    def on_save(self, args, state, control, **kwargs):
+        checkpoint_folder = os.path.join(
+            args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{state.global_step}"
+        )       
+
+        peft_model_path = os.path.join(checkpoint_folder, "adapter_model")
+        kwargs["model"].save_pretrained(peft_model_path)
+
+        pytorch_model_path = os.path.join(checkpoint_folder, "pytorch_model.bin")
+        if os.path.exists(pytorch_model_path):
+            os.remove(pytorch_model_path)
+        return control
+
+
 def generate_prompt_for_mrc(data_point):
-    user_prompt = """Below is a question paired with its context, please return the answer and \
-    the most relevant evidence in the format of: (Answer: ### Evidence:). If the question is unanswerable, \
-    directly return 'unanswerable' \
+    user_prompt = """Below is a question paired with its context, please return your response in two parts: \
+    1. the answer to the question\n2. the most relevant evidence in the context to answer the question.\n \
+    If the question is unanswerable, directly return 'unanswerable'\
     ###Question: {question} \
     ###Context: {context} \
     ###Response: """.format(question=data_point['question'], context=data_point['evidence'])
@@ -55,7 +71,7 @@ def generate_prompt_for_mrc(data_point):
         )["input_ids"][:-1]
     else:
         full_tokens = tokenizer(
-            user_prompt + "(Answer:{answer} ### Evidence:{evidence})".format(answer=data_point["answer"],
+            user_prompt + "1.Answer:{answer}\n2.Evidence:{evidence}".format(answer=data_point["answer"],
                                                                              evidence=data_point['supporting_fact']),
             truncation=True,
             max_length=args.max_length,
@@ -139,8 +155,9 @@ def prepare_data(args):
 def prepare_model(args):
     target_modules = [
         "q_proj",
-        # "k_proj",
+        "k_proj",
         "v_proj",
+        "o_proj"
     ]
 
     device_map = "auto"
@@ -234,9 +251,9 @@ def train(args):
         args=transformers.TrainingArguments(
             per_device_train_batch_size=args.micro_batch_size,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
-            warmup_steps=100,
+            warmup_steps=60,
             num_train_epochs=args.epochs,
-            max_steps=args.max_step,
+            # max_steps=args.max_step,
             learning_rate=args.learning_rate,
             fp16=True,
             logging_steps=20,
@@ -249,9 +266,10 @@ def train(args):
             load_best_model_at_end=True if args.test_size > 0 else False,
             ddp_find_unused_parameters=False if args.ddp else None,
             report_to="wandb" if args.wandb else [],
-            ignore_data_skip=args.ignore_data_skip,
+            ignore_data_skip=args.ignore_data_skip
         ),
-        data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False)
+        data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False),
+        callbacks=[PeftSavingCallback]
     )
     model.config.use_cache = False
 
@@ -265,8 +283,8 @@ def train(args):
 
     print("\n If there's a warning about missing keys above, please disregard :)")
 
-    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
-
+    trainer.train()
+    model.save_pretrained(args.output_path)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -274,16 +292,16 @@ if __name__ == '__main__':
     parser.add_argument("--data_path", type=str, default="/path/to/data")
     parser.add_argument("--output_path", type=str, default="/path/to/output")
     parser.add_argument("--model_path", type=str, default="/path/to/model")
-    parser.add_argument("--eval_steps", type=int, default=200)
-    parser.add_argument("--save_steps", type=int, default=200)
+    parser.add_argument("--eval_steps", type=int, default=50)
+    parser.add_argument("--save_steps", type=int, default=50)
     parser.add_argument("--test_size", type=int, default=200)
     parser.add_argument("--resume_from_checkpoint", type=str, default=None)
     parser.add_argument("--lora_remote_checkpoint", type=str, default=None)
     parser.add_argument("--ignore_data_skip", type=str, default="False")
-    parser.add_argument("--micro_batch_size", type=int, default=4)
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=16)
-    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--micro_batch_size", type=int, default=32)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning_rate", type=float, default=3e-4)
     parser.add_argument("--max_length", type=int, default=2048)
     parser.add_argument("--lora_r", type=int, default=8)
