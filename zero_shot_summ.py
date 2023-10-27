@@ -6,7 +6,7 @@ python3 -m fastchat.serve.huggingface_api --model lmsys/vicuna-7b-v1.3
 python3 -m fastchat.serve.huggingface_api --model lmsys/fastchat-t5-3b-v1.0
 """
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="2"
 import argparse
 import json
 from tqdm import tqdm
@@ -34,11 +34,12 @@ def inference(args, model, tokenizer, prompt):
     input_ids = tokenizer([prompt], truncation=True).input_ids
     output_ids = model.generate(
         torch.as_tensor(input_ids).cuda(),
-        do_sample=True,
+        # do_sample=True,
         temperature=args.temperature,
         repetition_penalty=args.repetition_penalty,
         max_new_tokens=args.max_new_tokens,
-        min_new_tokens=args.min_new_tokens
+        min_new_tokens=args.min_new_tokens,
+        num_beams=2
     )
 
     if model.config.is_encoder_decoder:
@@ -59,7 +60,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--min_new_tokens", type=int, default=1)
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--test_size", type=int, default=100)
+    parser.add_argument("--test_size", type=int, default=500)
     parser.add_argument("--prompt", type=str, default="Please summarize the following scientific paper: {text}")
     args = parser.parse_args()
 
@@ -68,10 +69,11 @@ if __name__ == "__main__":
         args.repetition_penalty = 1.2
 
     dataset = load_dataset("json", 
-                           data_files="/mnt/data/zekai/processed_scimrc.json")['train']
+                           data_files="/mnt/data/zekai/generator_data.json")['train']
 
     model, tokenizer = load_model(
-        args.model_path,
+        # args.model_path,
+        "/mnt/data/zekai/vicuna_7b",
         args.device,
         args.num_gpus,
         args.max_gpu_memory,
@@ -86,9 +88,10 @@ if __name__ == "__main__":
     for i in tqdm(range(args.test_size)):
         example = dataset[i]
         summary = example['summary']
-        paper = example['text'][:8000]
-        question = example['question']
-        answer = example['answer']
+        paper = example['text'][:6000]
+        # question = example['question']
+        # answer = example['answer']
+        qa_pairs = example['qa_pairs']
         msg = args.prompt.format(text=paper)
 
         conv = get_conversation_template(args.model_path)
@@ -100,12 +103,14 @@ if __name__ == "__main__":
 
         ref_summaries.append(summary)
         pred_summaries.append(pred)
-
-        saved_result.append({
-            'summary': pred,
-            'question': question,
-            'answer': answer
-        })
+        for qa_pair in qa_pairs:
+            question = qa_pair[0]
+            answer = qa_pair[1]
+            saved_result.append({
+                'summary': pred,
+                'question': question,
+                'answer': answer
+            })
 
     metrics = compute_metrics((pred_summaries, ref_summaries))
     save_preds(saved_result)
