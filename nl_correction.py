@@ -1,5 +1,6 @@
 import json
 import os
+os.environ["CUDA_VISIBLE_DEVICES"]="1,2"
 import re
 import string
 import random
@@ -15,8 +16,8 @@ from peft import PeftModel, prepare_model_for_int8_training
 import argparse
 from inference_helper import StreamPeftGenerationMixin
 
+# nlp = spacy.load("/home/users/nus/e0817846/.conda/envs/vicuna/lib/python3.10/site-packages/en_core_web_sm/en_core_web_sm-3.7.0")
 nlp = spacy.load("en_core_web_sm")
-
 
 class SciMRCDataset(Dataset):
     def __init__(self, tokenizer, data, max_length):
@@ -226,7 +227,10 @@ def refine_step(args, tokenizer, base_model, text, feedback):
 
 
 def create_mini_batch(indices, mini_batch_size):
-    return random.sample(indices, mini_batch_size)
+    if mini_batch_size <= len(indices):
+        return random.sample(indices, mini_batch_size)
+    else:
+        return indices
 
 
 def similarity_filter(new_feedback, old_feedbacks):
@@ -418,7 +422,7 @@ if __name__ == '__main__':
 
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
-    results_to_save = batched_correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(5)))
+    results_to_save = batched_correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(100)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)
