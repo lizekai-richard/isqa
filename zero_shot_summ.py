@@ -6,7 +6,7 @@ python3 -m fastchat.serve.huggingface_api --model lmsys/vicuna-7b-v1.3
 python3 -m fastchat.serve.huggingface_api --model lmsys/fastchat-t5-3b-v1.0
 """
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="2"
+os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
 import argparse
 import json
 from tqdm import tqdm
@@ -14,12 +14,13 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from torchmetrics.text.rouge import ROUGEScore
 from datasets import load_dataset
-
+from transformers import LlamaTokenizer, LlamaForCausalLM
+from peft import PeftModel, prepare_model_for_int8_training
 from fastchat.model import load_model, get_conversation_template, add_model_args
 
 
 def save_preds(saved_result):
-    with open("summary_before_tune.json", "w") as f:
+    with open("summary_before_tune_13b.json", "w") as f:
         json.dump(saved_result, f)
 
 def compute_metrics(eval_pred):
@@ -61,7 +62,7 @@ if __name__ == "__main__":
     parser.add_argument("--min_new_tokens", type=int, default=1)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--test_size", type=int, default=500)
-    parser.add_argument("--prompt", type=str, default="Please summarize the following scientific paper: {text}")
+    parser.add_argument("--prompt", type=str, default="Please summarize the following scientific paper:\n###Paper: {text}\n###Summary: ")
     args = parser.parse_args()
 
     # Reset default repetition penalty for T5 models.
@@ -71,17 +72,17 @@ if __name__ == "__main__":
     dataset = load_dataset("json", 
                            data_files="/mnt/data/zekai/generator_data.json")['train']
 
-    model, tokenizer = load_model(
-        # args.model_path,
-        "/mnt/data/zekai/vicuna_7b",
-        args.device,
-        args.num_gpus,
-        args.max_gpu_memory,
-        args.load_8bit,
-        args.cpu_offloading,
-        revision=args.revision,
-        debug=args.debug,
+
+    tokenizer = LlamaTokenizer.from_pretrained(args.model_path)
+    tokenizer.pad_token_id = 0
+
+    model = LlamaForCausalLM.from_pretrained(
+        "/mnt/data/zekai/vicuna_13b",
+        load_in_8bit=True,
+        torch_dtype=torch.float16,
+        device_map='auto'
     )
+    model = prepare_model_for_int8_training(model)
 
     ref_summaries, pred_summaries = [], []
     saved_result = []
@@ -89,16 +90,18 @@ if __name__ == "__main__":
         example = dataset[i]
         summary = example['summary']
         paper = example['text'][:6000]
+        qa_pairs = example['qa_pairs']
         # question = example['question']
         # answer = example['answer']
-        qa_pairs = example['qa_pairs']
-        msg = args.prompt.format(text=paper)
+        
+        # msg = args.prompt.format(text=paper)
 
-        conv = get_conversation_template(args.model_path)
-        conv.append_message(conv.roles[0], msg)
-        conv.append_message(conv.roles[1], None)
-        prompt = conv.get_prompt()
-
+        # conv = get_conversation_template(args.model_path)
+        # conv.append_message(conv.roles[0], msg)
+        # conv.append_message(conv.roles[1], None)
+        # prompt = conv.get_prompt()
+        # print(prompt)
+        prompt = args.prompt.format(text=paper)
         pred = inference(args, model, tokenizer, prompt)
 
         ref_summaries.append(summary)

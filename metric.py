@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="2"
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
 import json
 import re
 import string
@@ -59,7 +59,7 @@ class FactualityMetric:
         })
 
         metrics = {}
-        if self.metrics_name == 'f1':
+        if self.metrics_name == 'qags':
             f1, precision, recall = self.token_level_f1_score(pred, answer)
             metrics['f1'] = f1
             metrics['precision'] = precision
@@ -103,14 +103,14 @@ class FactualityMetric:
         return white_space_fix(remove_redundant_whitespace(remove_articles(remove_punc(remove_special_tokens(lower(s))))))
 
     def token_level_f1_score(self, pred, label):
-        # normalized_pred, normalized_label = self.normalize_answer(pred), self.normalize_answer(label)
-        # if normalized_pred == "unanswerable":
-        #     return -1, -1, -1
-        # prediction_tokens = normalized_pred.split()
-        # ground_truth_tokens = normalized_label.split()
+        normalized_pred, normalized_label = self.normalize_answer(pred), self.normalize_answer(label)
+        if normalized_pred == "unanswerable":
+            return -1, -1, -1
+        prediction_tokens = normalized_pred.split()
+        ground_truth_tokens = normalized_label.split()
 
-        prediction_tokens = process_example(pred)
-        ground_truth_tokens = process_example(label)
+        # prediction_tokens = process_example(pred)
+        # ground_truth_tokens = process_example(label)
 
         if "unanswerable" in prediction_tokens:
             return -1, -1, -1
@@ -161,7 +161,7 @@ def compute_from_summary(args):
             
         cnt += 1
 
-    if metric.metrics_name == 'f1':
+    if metric.metrics_name == 'qags':
         avg_f1 = tot_f1 / cnt
         avg_prec = tot_prec / cnt
         avg_rec = tot_rec / cnt
@@ -183,7 +183,7 @@ if __name__ == '__main__':
     parser.add_argument("--data_path", type=str, default="/path/to/data")
     parser.add_argument("--save_path", type=str, default="/path/to/save")
     parser.add_argument("--qa_result_path", type=str, default=None)
-    parser.add_argument("--metrics_name", type=str, default="f1")
+    parser.add_argument("--metrics_name", type=str, default="qags")
     parser.add_argument("--prompt", type=str)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--num_beams", type=int, default=2)
@@ -194,8 +194,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     args.prompt = """
-        Read the context: {context} \n Answer the question: {question}. 
-        If the question is unanswerable, return "unanswerable" \n Answer:
+        Below is a question paired with its context, please give your answer based on the context. If the question is unanswerable, directly return 'unanswerable'.
+        ###Question: {question}
+        ###Context: {context}
+        ###Answer:
     """
 
     if args.qa_result_path is None:

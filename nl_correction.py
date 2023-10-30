@@ -1,6 +1,6 @@
 import json
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="1,2"
+os.environ["CUDA_VISIBLE_DEVICES"]="1,3"
 import re
 import string
 import random
@@ -18,33 +18,6 @@ from inference_helper import StreamPeftGenerationMixin
 
 # nlp = spacy.load("/home/users/nus/e0817846/.conda/envs/vicuna/lib/python3.10/site-packages/en_core_web_sm/en_core_web_sm-3.7.0")
 nlp = spacy.load("en_core_web_sm")
-
-class SciMRCDataset(Dataset):
-    def __init__(self, tokenizer, data, max_length):
-        super().__init__()
-        self.tokenizer = tokenizer
-        self.data = data
-        self.max_length = max_length
-
-    def __getitem__(self, index):
-        example = self.data[index]
-        input = example['text'][:6000]
-        _id = example['id']
-        summary = example['summary']
-        question = example['question']
-        answer = example['answer']
-
-        # prompt = generate_prompt(instruction, input=input)
-        prompt = "###Summarize the following academic paper: {paper} \n ###Summary:".format(paper=input)
-        inputs = self.tokenizer(prompt, max_length=self.max_length, padding='max_length',
-                                truncation=True, return_tensors="pt")
-        input_ids = inputs['input_ids'][0]
-
-        return _id, input_ids, summary, question, answer
-
-    def __len__(self):
-        return len(self.data)
-
 
 def load_base_model(args):
     tokenizer = LlamaTokenizer.from_pretrained(args.model_path)
@@ -121,7 +94,7 @@ def generate_prompt_for_feedback_model(summary, question):
     
     return prompt
 
-
+@torch.inference_mode()
 def generate_feedback(args, model, tokenizer, summary, question, answer):
     prompt = generate_prompt_for_feedback_model(summary, question)
     input_ids = tokenizer(
@@ -173,6 +146,7 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
     feedback_sp = output[sp_index + len(sp_prefix):]
     return feedback_sp, token_level_f1_score(feedback_ans, answer)
 
+
 def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
     feedback_dict = {}
     feedback_signal, score = generate_feedback(args, feedback_model, tokenizer, summary, question, answer)
@@ -188,7 +162,7 @@ def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
 
     return feedback_dict
 
-
+@torch.inference_mode()
 def refine_step(args, tokenizer, base_model, text, feedback):
     # prompt = """
     #     Below is a scientific paper. Please summarize the paper based on the provided facts and non-facts.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
@@ -242,7 +216,7 @@ def similarity_filter(new_feedback, old_feedbacks):
             return False
     return True
 
-
+@torch.inference_mode()
 def batched_correction_stage(args, base_model, tokenizer, feedback_model, dataset):
     results_to_save = {}
     avg_f1_score = 0.0
@@ -257,8 +231,7 @@ def batched_correction_stage(args, base_model, tokenizer, feedback_model, datase
             results_to_save[_id] = []
 
             initial_prompt = """
-                Please summarize the following scientific document.\n###Paper: {text}\n###Summary:
-            """.format(text=text)
+                Please summarize the following scientific paper.\n###Paper: {text}\n###Summary:""".format(text=text)
 
             input_ids = tokenizer(
                 initial_prompt,
@@ -422,7 +395,7 @@ if __name__ == '__main__':
 
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
-    results_to_save = batched_correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(100)))
+    results_to_save = batched_correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(50)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)
