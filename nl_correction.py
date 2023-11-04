@@ -1,6 +1,6 @@
 import json
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="1,3"
+os.environ["CUDA_VISIBLE_DEVICES"]="2,3"
 import re
 import string
 import random
@@ -163,6 +163,38 @@ def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
     return feedback_dict
 
 @torch.inference_mode()
+def generic_refine_step(args, tokenizer, base_model, text, step):
+    # prompt = """
+    #     Below is a scientific paper. Please summarize the paper based on the provided facts and non-facts.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
+    # """
+    prompt = """
+        Below is a scientific paper. Please write a summary based on the feedback.\n###Paper: {text}\n###Feedback: {feedback}\n###Summary:
+    """
+    feedback = ' '.join((["Please revise your summary and make it more factually consistent."]) * (step + 1))
+
+    prompt = prompt.format(text=text, feedback=feedback)
+    input_ids = tokenizer(
+        prompt,
+        max_length=args.max_length,
+        padding='max_length',
+        truncation=True,
+        return_tensors='pt'
+    ).input_ids.cuda()
+
+    output_ids = base_model.generate(
+        input_ids,
+        num_beams=args.num_beams,
+        max_new_tokens=args.gen_max_new_tokens,
+        min_new_tokens=args.gen_min_new_tokens,
+        temperature=args.temperature
+    )
+
+    output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
+                              clean_up_tokenization_spaces=True)
+    return output
+
+
+@torch.inference_mode()
 def refine_step(args, tokenizer, base_model, text, feedback):
     # prompt = """
     #     Below is a scientific paper. Please summarize the paper based on the provided facts and non-facts.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
@@ -230,8 +262,7 @@ def batched_correction_stage(args, base_model, tokenizer, feedback_model, datase
 
             results_to_save[_id] = []
 
-            initial_prompt = """
-                Please summarize the following scientific paper.\n###Paper: {text}\n###Summary:""".format(text=text)
+            initial_prompt = """Please summarize the following scientific paper.\n###Paper: {text}\n###Summary:""".format(text=text)
 
             input_ids = tokenizer(
                 initial_prompt,
@@ -281,15 +312,15 @@ def batched_correction_stage(args, base_model, tokenizer, feedback_model, datase
                         'feedback': feedback,
                         'f1-score': batch_avg_score
                     })
-                    pred_summary = refine_step(args, tokenizer, base_model, text, feedback)
-
+                    # pred_summary = refine_step(args, tokenizer, base_model, text, feedback)
+                    pred_summary = generate_feedback(args, tokenizer, base_model, text, i)
             if best_score > 0:
                 avg_f1_score += best_score
                 tot_cnt += 1
     print("Average F1 score after self-correction is: ", avg_f1_score/tot_cnt)
     return results_to_save
 
-
+@torch.inference_mode()
 def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
     results_to_save = {}
     avg_f1_score = 0.0
