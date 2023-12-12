@@ -84,7 +84,6 @@ def generate_prompt_for_mrc(data_point):
     }
 
 
-
 def generate_and_tokenize_prompt(data_point):
     # This function masks out the labels for the input,
     # so that our loss is computed only on the response.
@@ -285,6 +284,7 @@ def train(args):
 
     trainer.train()
     model.save_pretrained(args.output_path)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

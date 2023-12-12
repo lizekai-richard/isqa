@@ -13,7 +13,8 @@ nltk.download('averaged_perceptron_tagger')
 nltk.download('wordnet')
 
 print("Download Done!")
-# replace edited word
+
+
 def replace_edited_word(df):
     edited_df = df
     for i in range(len(df)):
@@ -24,18 +25,22 @@ def replace_edited_word(df):
 
     return edited_df
 
+
 # lowercase
 def lowercase(text):
     return text.lower()
+
 
 # remove numbers:
 def remove_numbers(text):
     return re.sub(r'\d+', '', text)
 
+
 # tokenization
 def tokenization(text):
     tokenized_text = word_tokenize(text)
     return tokenized_text
+
 
 # remove punctuations
 def remove_punctuation(tokenized_text):
@@ -45,6 +50,7 @@ def remove_punctuation(tokenized_text):
             edited_tokens.append(token)
     return edited_tokens
 
+
 # remove stopwords
 def remove_stopwords(tokenized_text):
     edited_tokens = []
@@ -53,6 +59,7 @@ def remove_stopwords(tokenized_text):
         if token not in stopword_list:
             edited_tokens.append(token)
     return edited_tokens
+
 
 # True-casing
 def true_casing(tokenized_text):
@@ -65,7 +72,7 @@ def true_casing(tokenized_text):
             edited_tokens.append(token.capitalize())
         else:
             edited_tokens.append(token)
-    edited_tokens
+    return edited_tokens
 
 # Stemming
 def stemming(tokenized_text):
@@ -76,6 +83,7 @@ def stemming(tokenized_text):
     
     return edited_tokens
 
+
 # Lemmanisation
 def lemmanisation(tokenized_text):
     edited_tokens = []
@@ -85,9 +93,11 @@ def lemmanisation(tokenized_text):
 
     return edited_tokens
 
+
 def remove_special_tokens(text):
     
     return re.sub(r'<pad>|<\\s>', '', text)
+
 
 def process_example(text):
     return lemmanisation(
@@ -104,6 +114,7 @@ def process_example(text):
         )
     )
 
+
 def process(df):
     df['original'] = df['original'].apply(lowercase)
     df['original'] = df['original'].apply(remove_numbers)
@@ -113,6 +124,7 @@ def process(df):
     # df['original'] = df['original'].apply(stemming)
     df['original'] = df['original'].apply(lemmanisation)
     return df
+
 
 if __name__ == '__main__':
 
