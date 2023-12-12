@@ -20,32 +20,6 @@ import argparse
 # en_core_web_sm-3.7.0")
 nlp = spacy.load("en_core_web_sm")
 
-class SciMRCDataset(Dataset):
-    def __init__(self, tokenizer, data, max_length):
-        super().__init__()
-        self.tokenizer = tokenizer
-        self.data = data
-        self.max_length = max_length
-
-    def __getitem__(self, index):
-        example = self.data[index]
-        input = example['text'][:6000]
-        _id = example['id']
-        summary = example['summary']
-        question = example['question']
-        answer = example['answer']
-
-        # prompt = generate_prompt(instruction, input=input)
-        prompt = "###Summarize the following academic paper: {paper} \n ###Summary:".format(paper=input)
-        inputs = self.tokenizer(prompt, max_length=self.max_length, padding='max_length',
-                                truncation=True, return_tensors="pt")
-        input_ids = inputs['input_ids'][0]
-
-        return _id, input_ids, summary, question, answer
-
-    def __len__(self):
-        return len(self.data)
-
 
 def load_base_model(args):
     tokenizer = LlamaTokenizer.from_pretrained(args.model_path)

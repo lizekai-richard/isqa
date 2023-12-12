@@ -1,6 +1,6 @@
 import json
 import os
-os.environ['CUDA_VISIBLE_DEVICES']='1'
+# os.environ['CUDA_VISIBLE_DEVICES']='1'
 import torch
 import argparse
 from tqdm import tqdm
@@ -51,7 +51,6 @@ def load_model(args):
     )
     print(args.lora_path)
     model = PeftModel.from_pretrained(model, args.lora_path)
-
     model.eval()
     return model
 

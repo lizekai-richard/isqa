@@ -5,20 +5,13 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="8b46bde0-9d80-4e59-b86f-5934bfec1135" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/utils/multi-step.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/baseline.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/analysis.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/finetune.py" beforeDir="false" afterPath="$PROJECT_DIR$/finetune.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/nl_correction.py" beforeDir="false" afterPath="$PROJECT_DIR$/iter_refine_on_feedback.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/check_score.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/check_score.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/debug.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/instruction_format.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/plot_score_curve.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/preprocessing.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/preprocessing.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/scimrc_stat.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/test_output_format.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/test_self_correction.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/test_self_correction.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/vicuna_format.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/evaluate_feedback_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/evaluate_feedback_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/iter_refine_on_feedback.py" beforeDir="false" afterPath="$PROJECT_DIR$/iter_refine_on_feedback.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/metric.py" beforeDir="false" afterPath="$PROJECT_DIR$/metrics.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/zero_shot_mrc.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/zero_shot_mrc.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/zero_shot_summ.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/zero_shot_summ.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -64,7 +57,7 @@
     </key>
   </component>
   <component name="RunManager">
-    <configuration name="metric" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="metrics" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="LLM_MRC_Summ" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
@@ -77,7 +70,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/metric.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/metrics.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -88,7 +81,7 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.metric" />
+        <item itemvalue="Python.metrics" />
       </list>
     </recent_temporary>
   </component>
@@ -120,7 +113,7 @@
       <workItem from="1698819310374" duration="97000" />
       <workItem from="1699076865376" duration="13000" />
       <workItem from="1700484636401" duration="5000" />
-      <workItem from="1702348560999" duration="875000" />
+      <workItem from="1702348560999" duration="7098000" />
     </task>
     <servers />
   </component>

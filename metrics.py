@@ -1,13 +1,13 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
+# os.environ["CUDA_VISIBLE_DEVICES"]="3"
 import json
 import re
 import string
+import torch
 from argparse import ArgumentParser
 from utils.preprocessing import process_example
 from collections import Counter
 from tqdm import tqdm
-import torch
 from torchmetrics.text.rouge import ROUGEScore
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
@@ -17,9 +17,9 @@ class FactualityMetric:
 
     def __init__(self, args):
         
-        self.metrics_name = args.metrics_name
-        self.tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name, device_map="auto")
+        # self.metrics_name = args.metrics_name
+        self.tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(args.model_path, device_map="auto")
         self.save_path = args.save_path
         # self.device = torch.device(args.device)
         self.prompt = args.prompt
@@ -30,7 +30,23 @@ class FactualityMetric:
         self.repetition_penalty = args.repetition_penalty
         self.saved_results = []
 
-    def compute_metrics(self, question, summary, answer):
+    def compute_metrics(self, predictions):
+        avg_scores = 0
+        for pred in predictions:
+            pred_summary = pred['pred']
+            qa_pairs = pred['qa_pairs']
+            avg_score = 0
+            for question, answer in qa_pairs:
+                metric = self.compute_metrics_step(question, pred_summary, answer)
+                avg_score += metric['f1']
+            avg_score /= len(qa_pairs)
+
+            avg_scores += avg_score
+        avg_scores /= len(predictions)
+        return avg_scores
+
+    @torch.inference_mode()
+    def compute_metrics_step(self, question, summary, answer):
 
         input_text = self.prompt.format(context=summary, question=question)
         input_ids = self.tokenizer(
@@ -59,25 +75,10 @@ class FactualityMetric:
         })
 
         metrics = {}
-        if self.metrics_name == 'qags':
-            f1, precision, recall = self.token_level_f1_score(pred, answer)
-            metrics['f1'] = f1
-            metrics['precision'] = precision
-            metrics['recall'] = recall
-        elif self.metrics_name == 'rouge':
-            rouge = ROUGEScore()
-            _pred = self.normalize_answer(pred)
-            _answer = self.normalize_answer(answer)
-
-            if "unanswerable" in _pred:
-                metrics['rouge1'] = -1
-                metrics['rouge2'] = -1
-                metrics['rougeL'] = -1
-            else:
-                score = rouge(_pred, _answer)
-                metrics['rouge1'] = score['rouge1_fmeasure']
-                metrics['rouge2'] = score['rouge2_fmeasure']
-                metrics['rougeL'] = score['rougeL_fmeasure']
+        f1, precision, recall = self.token_level_f1_score(pred, answer)
+        metrics['f1'] = f1
+        metrics['precision'] = precision
+        metrics['recall'] = recall
         return metrics
 
     def normalize_answer(self, s):
@@ -129,61 +130,36 @@ class FactualityMetric:
             json.dump(self.saved_results, f)
 
 
-def compute_from_summary(args):
-    data = load_dataset("json", data_files=args.data_path)['train']
-    metric = FactualityMetric(args)
+class RougeMetric:
 
-    tot_f1, tot_prec, tot_rec = 0.0, 0.0, 0.0
-    tot_rouge1, tot_rouge2, tot_rougeL = 0.0, 0.0, 0.0
-    cnt = 0
-    for example in tqdm(data):
-        summary = example['summary']
-        summary = re.sub(r"\n|\*", "", summary)
-        question = example['question']
-        answer = example['answer']
+    def __init__(self):
+        self.rouge = ROUGEScore()
 
-        metrics = metric.compute_metrics(question, summary, answer)
+    def compute_metrics(self, predictions):
+        pred_summaries = []
+        gold_summaries = []
+        for pred in predictions:
+            pred_summary = pred['pred']
+            gold_summary = pred['label']
 
-        if "f1" in metrics.keys():
-            f1, precision, recall = metrics['f1'], metrics['precision'], metrics['recall']
-            if f1 <= 0 or precision <= 0 or recall <= 0: continue
-            tot_f1 += f1
-            tot_prec += precision
-            tot_rec += recall
+            pred_summaries.append(pred_summary)
+            gold_summaries.append(gold_summary)
 
-        elif "rouge1" in metrics.keys():
-            rouge1, rouge2, rougeL = metrics['rouge1'], metrics['rouge2'], metrics['rougeL']
-            if rouge1 <= 0 or rouge2 <= 0 or rougeL <= 0:
-                continue
-            tot_rouge1 += rouge1
-            tot_rouge2 += rouge2
-            tot_rougeL += rougeL
-            
-        cnt += 1
-
-    if metric.metrics_name == 'qags':
-        avg_f1 = tot_f1 / cnt
-        avg_prec = tot_prec / cnt
-        avg_rec = tot_rec / cnt
-        print({"f1": avg_f1, "precision": avg_prec, "recall": avg_rec})
-    elif metric.metrics_name == 'rouge':
-        avg_rouge1 = tot_rouge1 / cnt
-        avg_rouge2 = tot_rouge2 / cnt
-        avg_rougeL = tot_rougeL / cnt
-        print({'rouge1': avg_rouge1, 'rouge2': avg_rouge2, 'rougeL': avg_rougeL})
-    
-    metric.save_predictions()
-
+        rouge_score = self.rouge(pred_summaries, gold_summaries)
+        return {
+            'rouge1': rouge_score['rouge1_fmeasure'],
+            'rouge2': rouge_score['rouge2_fmeasure'],
+            'rougeL': rouge_score['rougeL_fmeasure']
+        }
 
 
 if __name__ == '__main__':
 
     parser = ArgumentParser()
     parser.add_argument("--model_name", type=str, default="/path/to/model")
-    parser.add_argument("--data_path", type=str, default="/path/to/data")
+    parser.add_argument("--prediction_path", type=str, default="/path/to/predicition")
     parser.add_argument("--save_path", type=str, default="/path/to/save")
-    parser.add_argument("--qa_result_path", type=str, default=None)
-    parser.add_argument("--metrics_name", type=str, default="qags")
+    # parser.add_argument("--metrics_name", type=str, default="qags")
     parser.add_argument("--prompt", type=str)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--num_beams", type=int, default=2)
@@ -200,8 +176,17 @@ if __name__ == '__main__':
         ###Answer:
     """
 
-    if args.qa_result_path is None:
-        compute_from_summary(args)
+    with open(args.prediction_path, "r") as f:
+        predictions = json.load(f)
+
+    qags = FactualityMetric(args)
+    rouge = RougeMetric()
+
+    qags_scores = qags.compute_metrics(predictions=predictions)
+    rouge_scores = rouge.compute_metrics(predictions=predictions)
+
+    print("Factuality Score: ", qags_scores)
+    print("Rouge Score: ", rouge_scores)
 
     
 
