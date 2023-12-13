@@ -89,15 +89,12 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str, default="/path/to/data")
     parser.add_argument("--model_path", type=str, default="/path/to/model")
     parser.add_argument("--output_path", type=str, default="/path/to/output")
-    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max_length", type=int, default=2048)
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--min_new_tokens", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--test_size", type=int, default=500)
-    parser.add_argument("--prompt", type=str,
-                        default="Please summarize the following scientific paper:\n###Paper: {text}\n###Summary: ")
     args = parser.parse_args()
 
     data = load_dataset("json", data_files=args.data_path)['train']
