@@ -3,6 +3,7 @@ import os
 import argparse
 import json
 import torch
+from tqdm import tqdm
 from datasets import load_dataset
 from torch.utils.data import Dataset, DataLoader
 from transformers import LlamaTokenizer, LlamaForCausalLM, T5ForConditionalGeneration, T5Tokenizer
@@ -62,10 +63,11 @@ def load_model(args):
 
 
 @torch.inference_mode()
-def inference(args, model, tokenizer, data_loader):
+def inference(args, model, tokenizer, dataset):
     results_to_save = []
-    for batch in data_loader:
-        _ids, input_ids, summaries, qa_pairs = batch
+    for data in tqdm(dataset):
+        _ids, input_ids, summaries, qa_pairs = data['id'], data['input_ids'], data['summary'], \
+        data['qa_pairs']
 
         output_ids = model.generate(
             input_ids.cuda(),
@@ -75,17 +77,16 @@ def inference(args, model, tokenizer, data_loader):
             temperature=args.temperature
         )
 
-        for i in range(len(output_ids)):
-            if model.config.is_encoder_decoder:
-                output = tokenizer.decode(output_ids[i, :], skip_special_tokens=True)
-            else:
-                output = tokenizer.decode(output_ids[i, len(input_ids[0]):], skip_special_tokens=True)
-            results_to_save.append({
-                'id': _ids[i],
-                'pred': output,
-                'label': summaries[i],
-                'qa_pairs': qa_pairs[i]
-            })
+        if model.config.is_encoder_decoder:
+            output = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+        else:
+            output = tokenizer.decode(output_ids[0, len(input_ids[0]):], skip_special_tokens=True)
+        results_to_save.append({
+            'id': _ids,
+            'pred': output,
+            'label': summaries,
+            'qa_pairs': qa_pairs
+        })
     return results_to_save
 
 
@@ -99,6 +100,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--min_new_tokens", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--num_beams", type=int, default=2)
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
@@ -106,9 +108,10 @@ if __name__ == "__main__":
     tokenizer, model = load_model(args)
 
     dataset = SciMRCDataset(tokenizer, data, args.max_length)
-    data_loader = DataLoader(dataset, batch_size=args.batch_size)
+    # print(dataset[0])
+    # data_loader = DataLoader(dataset, batch_size=args.batch_size)
 
-    results = inference(args, model, tokenizer, data_loader)
+    results = inference(args, model, tokenizer, dataset)
 
     with open(args.output_path, "w") as f:
         json.dump(results, f)
