@@ -29,7 +29,12 @@ class SciMRCDataset(Dataset):
                                 truncation=True, return_tensors="pt")
         input_ids = inputs['input_ids'][0]
 
-        return _id, input_ids, summary, qa_pairs
+        return {
+            'id': _id,
+            'input_ids': input_ids,
+            'summary': summary,
+            'qa_pairs': qa_pairs
+        }
 
     def __len__(self):
         return len(self.data)
