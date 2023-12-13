@@ -72,7 +72,7 @@ def generate_prompt_for_mrc(data_point):
     else:
         full_tokens = tokenizer(
             user_prompt + "1.Answer:{answer}\n2.Evidence:{evidence}".format(answer=data_point["answer"],
-                                                                             evidence=data_point['supporting_fact']),
+                                                                            evidence=data_point['supporting_fact']),
             truncation=True,
             max_length=args.max_length,
             padding="max_length",
