@@ -11,7 +11,7 @@ from tqdm import tqdm
 from torch.utils.data import Dataset
 import bitsandbytes as bnb
 from datasets import load_dataset
-from transformers import LlamaTokenizer, LlamaForCausalLM
+from transformers import LlamaTokenizer, LlamaForCausalLM, T5ForConditionalGeneration, T5Tokenizer
 from peft import PeftModel, prepare_model_for_int8_training
 import argparse
 
@@ -22,15 +22,28 @@ nlp = spacy.load("en_core_web_sm")
 
 
 def load_base_model(args):
-    tokenizer = LlamaTokenizer.from_pretrained(args.model_path)
-    tokenizer.pad_token_id = 0
+    if "t5" in args.model_path:
+        tokenizer = T5Tokenizer.from_pretrained(args.model_path)
+        model = T5ForConditionalGeneration.from_pretrained(
+            args.model_path,
+            load_in_8bit=args.use_8bit,
+            torch_dtype=torch.float16,
+            device_map='auto'
+        )
+    else:
+        tokenizer = LlamaTokenizer.from_pretrained(args.model_path)
+        if "llama" in args.model_path:
+            tokenizer.pad_token = tokenizer.unk_token
+            tokenizer.padding_side = "left"
+        else:
+            tokenizer.pad_token_id = 0
 
-    model = LlamaForCausalLM.from_pretrained(
-        args.model_path,
-        load_in_8bit=args.use_8bit,
-        torch_dtype=torch.float16,
-        device_map='auto'
-    )
+        model = LlamaForCausalLM.from_pretrained(
+            args.model_path,
+            load_in_8bit=args.use_8bit,
+            torch_dtype=torch.float16,
+            device_map='auto'
+        )
     model = prepare_model_for_int8_training(model)
     return tokenizer, model
 
@@ -169,9 +182,7 @@ def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
 
 @torch.inference_mode()
 def refine_step(args, tokenizer, base_model, text, feedback):
-    # prompt = """
-    #     Below is a scientific paper. Please summarize the paper based on the provided facts and non-facts.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
-    # """
+
     prompt = """
         Below is a scientific paper. Please write a summary based on facts and non-facts we provide.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
     """
@@ -200,8 +211,12 @@ def refine_step(args, tokenizer, base_model, text, feedback):
         temperature=args.temperature
     )
 
-    output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
-                              clean_up_tokenization_spaces=True)
+    if base_model.config.is_encoder_decoder:
+        output = tokenizer.decode(output_ids[0], skip_special_tokens=True,
+                                  clean_up_tokenization_spaces=True)
+    else:
+        output = tokenizer.decode(output_ids[0][len(input_ids):], skip_special_tokens=True,
+                                  clean_up_tokenization_spaces=True)
     return output
 
 
@@ -331,7 +346,10 @@ def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
                 temperature=args.temperature
             )
 
-            pred_summary = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True)
+            if base_model.config.is_encoder_decoder:
+                pred_summary = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            else:
+                pred_summary = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True)
             feedback = {'facts': [], 'non_facts': []}
             prev_score = 0
             max_score_for_cur_example = 0.0
