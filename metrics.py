@@ -1,6 +1,7 @@
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"]="3"
 import json
+import random
 import re
 import string
 import torch
@@ -37,8 +38,12 @@ class FactualityMetric:
         avg_scores = 0
         for pred in tqdm(predictions):
             pred_summary = pred['pred']
-            # qa_pairs = pred['qa_pairs']
+
+            qa_pairs_from_ds = pred["qa_pairs"]
             qa_pairs = generate_qa(pred_summary, n_qa_pairs=self.n_questions, qg_model_path=self.qg_model_path)
+            qa_pairs.extend(qa_pairs_from_ds)
+            random.shuffle(qa_pairs)
+
             avg_score = 0
             for question, answer in qa_pairs:
                 metric = self.compute_metrics_step(question, pred_summary, answer)
