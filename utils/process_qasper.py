@@ -84,6 +84,6 @@ print(len(processed_data_for_feedback))
 print(processed_data_for_feedback[200])
 
 with open("feedback_data_qasper.json", "w") as f:
-    json.dump(processed_data_for_generator, f)
+    json.dump(processed_data_for_feedback, f)
 
 
