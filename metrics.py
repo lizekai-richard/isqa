@@ -11,6 +11,7 @@ from tqdm import tqdm
 from torchmetrics.text.rouge import ROUGEScore
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from utils.generate_qa_pairs import generate_qa
 
 
 class FactualityMetric:
@@ -28,13 +29,16 @@ class FactualityMetric:
         self.min_new_tokens = args.min_new_tokens
         self.num_beams = args.num_beams
         self.repetition_penalty = args.repetition_penalty
+        self.n_questions = args.n_questions
+        self.qg_model_path = args.qg_model_path
         self.saved_results = []
 
     def compute_metrics(self, predictions):
         avg_scores = 0
-        for pred in predictions:
+        for pred in tqdm(predictions):
             pred_summary = pred['pred']
-            qa_pairs = pred['qa_pairs']
+            # qa_pairs = pred['qa_pairs']
+            qa_pairs = generate_qa(pred_summary, n_qa_pairs=self.n_questions, qg_model_path=self.qg_model_path)
             avg_score = 0
             for question, answer in qa_pairs:
                 metric = self.compute_metrics_step(question, pred_summary, answer)
@@ -156,16 +160,17 @@ class RougeMetric:
 if __name__ == '__main__':
 
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default="/path/to/model")
+    parser.add_argument("--model_path", type=str, default="/path/to/model")
     parser.add_argument("--prediction_path", type=str, default="/path/to/predicition")
     parser.add_argument("--save_path", type=str, default="/path/to/save")
-    # parser.add_argument("--metrics_name", type=str, default="qags")
     parser.add_argument("--prompt", type=str)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--num_beams", type=int, default=2)
     parser.add_argument("--repetition_penalty", type=float, default=1.3)
     parser.add_argument("--max_new_tokens", type=int, default=100)
     parser.add_argument("--min_new_tokens", type=int, default=1)
+    parser.add_argument("--n_questions", type=int, default=10)
+    parser.add_argument("--qg_model_path", type=str, default="/path/to/qg/model")
 
     args = parser.parse_args()
 
