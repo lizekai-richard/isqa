@@ -1,6 +1,6 @@
 import json
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 import re
 import string
 import random
@@ -22,24 +22,23 @@ nlp = spacy.load("en_core_web_sm")
 
 
 def load_base_model(args):
-    if "t5" in args.model_path:
-        tokenizer = T5Tokenizer.from_pretrained(args.model_path)
-        model = T5ForConditionalGeneration.from_pretrained(
-            args.model_path,
+    if "t5" not in args.base_model_path:
+        tokenizer = LlamaTokenizer.from_pretrained(args.base_model_path)
+
+        if ("llama" or "vicuna") in args.base_model_path:
+            tokenizer.pad_token = tokenizer.unk_token
+            tokenizer.padding_side = "left"
+
+        model = LlamaForCausalLM.from_pretrained(
+            args.base_model_path,
             load_in_8bit=args.use_8bit,
             torch_dtype=torch.float16,
             device_map='auto'
         )
     else:
-        tokenizer = LlamaTokenizer.from_pretrained(args.model_path)
-        if "llama" in args.model_path:
-            tokenizer.pad_token = tokenizer.unk_token
-            tokenizer.padding_side = "left"
-        else:
-            tokenizer.pad_token_id = 0
-
-        model = LlamaForCausalLM.from_pretrained(
-            args.model_path,
+        tokenizer = T5Tokenizer.from_pretrained(args.base_model_path)
+        model = T5ForConditionalGeneration.from_pretrained(
+            args.base_model_path,
             load_in_8bit=args.use_8bit,
             torch_dtype=torch.float16,
             device_map='auto'
@@ -49,18 +48,18 @@ def load_base_model(args):
 
 
 def load_feedback_model(args):
-    base_model = LlamaForCausalLM.from_pretrained(
-        args.model_path,
+    feedback_model = LlamaForCausalLM.from_pretrained(
+        args.feedback_model_path,
         load_in_8bit=args.use_8bit,
         device_map='auto'
     )
-    model = PeftModel.from_pretrained(
-        base_model,
+    feedback_model = PeftModel.from_pretrained(
+        feedback_model,
         args.lora_path,
         device_map="auto"
     )
-    model = prepare_model_for_int8_training(model)
-    return model
+    feedback_model = prepare_model_for_int8_training(feedback_model)
+    return feedback_model
 
 
 def normalize_answer(s):
@@ -392,7 +391,8 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--data_path", type=str, default="/path/to/data")
     parser.add_argument("--save_path", type=str, default="/path/to/save")
-    parser.add_argument("--model_path", type=str, default="/path/to/model")
+    parser.add_argument("--base_model_path", type=str, default="/path/to/base/model")
+    parser.add_argument("--feedback_model_path", type=str, default="/path/to/feedback/model")
     parser.add_argument("--lora_path", type=str, default="/path/to/adapter")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None)
     parser.add_argument("--lora_remote_checkpoint", type=str, default=None)
@@ -422,7 +422,7 @@ if __name__ == '__main__':
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
     results_to_save = batched_correction_stage(args, base_model, tokenizer, feedback_model,
-                                               dataset.select(range(300, 500)))
+                                               dataset.select(range(2)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)
