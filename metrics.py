@@ -34,19 +34,26 @@ class FactualityMetric:
         self.qg_model_path = args.qg_model_path
         self.saved_results = []
 
-    def compute_metrics(self, predictions):
+    def compute_metrics(self, data, predictions):
         avg_scores = 0
         for pred in tqdm(predictions):
+            _id = pred['id']
             pred_summary = pred['pred']
 
-            qa_pairs_from_ds = pred["qa_pairs"]
+            # qa_pairs_from_ds = pred["qa_pairs"]
             qa_pairs = generate_qa(pred_summary, n_qa_pairs=self.n_questions, qg_model_path=self.qg_model_path)
-            qa_pairs.extend(qa_pairs_from_ds)
+            # qa_pairs.extend(qa_pairs_from_ds)
             random.shuffle(qa_pairs)
+
+            context = ""
+            for d in data:
+                if d['id'] == _id:
+                    context = d['text'][:6000]
+            assert context != ""
 
             avg_score = 0
             for question, answer in qa_pairs:
-                metric = self.compute_metrics_step(question, pred_summary, answer)
+                metric = self.compute_metrics_step(question, context, answer)
                 avg_score += metric['f1']
             avg_score /= len(qa_pairs)
 
@@ -55,9 +62,9 @@ class FactualityMetric:
         return avg_scores
 
     @torch.inference_mode()
-    def compute_metrics_step(self, question, summary, answer):
+    def compute_metrics_step(self, question, context, answer):
 
-        input_text = self.prompt.format(context=summary, question=question)
+        input_text = self.prompt.format(context=context, question=question)
         input_ids = self.tokenizer(
             input_text,
             max_length=self.max_length,
@@ -166,6 +173,7 @@ if __name__ == '__main__':
 
     parser = ArgumentParser()
     parser.add_argument("--model_path", type=str, default="/path/to/model")
+    parser.add_argument("--data_path", type=str, default="/path/to/data")
     parser.add_argument("--prediction_path", type=str, default="/path/to/predicition")
     parser.add_argument("--save_path", type=str, default="/path/to/save")
     parser.add_argument("--prompt", type=str)
@@ -185,6 +193,8 @@ if __name__ == '__main__':
         ###Context: {context}
         ###Answer:
     """
+    with open(args.data_path, "r") as f:
+        data = json.load(f)
 
     with open(args.prediction_path, "r") as f:
         predictions = json.load(f)
