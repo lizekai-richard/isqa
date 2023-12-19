@@ -79,7 +79,7 @@ def generate_qa(summary_text, n_qa_pairs, qg_model_path):
     model = TransformersQG(language="en", model=qg_model_path)
     all_ans, all_txt = prepare_ans_conditional_data(summary_text, n_ans_per_txt=n_qa_pairs)
     questions = model.generate_q(list_context=all_txt, list_answer=all_ans)
-
+    qa_pairs = model.generate_qa(list_context=summary_text, num_questions=n_qa_pairs)
     assert len(questions) == len(all_ans)
     qa_pairs = [[question, answer] for question, answer in zip(questions, all_ans)]
 
