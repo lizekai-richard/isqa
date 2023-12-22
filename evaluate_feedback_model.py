@@ -23,13 +23,13 @@ class EvalDataset(Dataset):
         answer = example['answer']
         supporting_fact = example['supporting_fact']
 
-        prompt = """Below is a question paired with its context, please return the answer and \
-        the most relevant evidence in the format of: (Answer: ### Evidence:). If the question is unanswerable, \
-        directly return 'unanswerable' \
-        ###Question: {question} \
-        ###Context: {context} \
-        ###Response: """
-        inputs = self.tokenizer(prompt.format(question=question, input=context),
+        prompt = """Below is a question paired with its context, please return your response in two parts:\n1. the 
+                    answer to the question\n2. the most relevant evidence in the context to answer the question.\nIf the 
+                    question is unanswerable, directly return 'unanswerable'.\n
+                    ###Question: {question}\n
+                    ###Context: {context}\n
+                    ###Response: """
+        inputs = self.tokenizer(prompt.format(question=question, context=context),
                                 max_length=512, padding='max_length',
                                 truncation=True, return_tensors="pt")
         input_ids = inputs['input_ids'][0]

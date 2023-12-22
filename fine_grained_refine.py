@@ -1,7 +1,6 @@
+import copy
 import json
 import os
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
 import re
 import string
 import random
@@ -16,10 +15,7 @@ from transformers import LlamaTokenizer, LlamaForCausalLM, T5ForConditionalGener
 from peft import PeftModel, prepare_model_for_int8_training
 import argparse
 
-# nlp = spacy.load("/home/users/nus/e0817846/.conda/envs/vicuna/lib/python3.10/site-packages/en_core_web_sm/
-# en_core_web_sm-3.7.0")
 nlp = spacy.load("en_core_web_sm")
-
 
 def load_base_model(args):
     if "t5" not in args.base_model_path:
@@ -104,11 +100,11 @@ def token_level_f1_score(pred, label):
 
 def generate_prompt_for_feedback_model(summary, question):
     prompt = """Below is a question paired with its context, please return your response in two parts:\n1. the answer 
-                to the question\n2. the most relevant evidence in the context to answer the question.\nIf the question 
-                is unanswerable, directly return 'unanswerable'.\n
-                ###Question: {question}\n
-                ###Context: {context}\n
-                ###Response: """.format(question=question, context=summary)
+to the question\n2. the most relevant evidence in the context to answer the question.\nIf the question 
+is unanswerable, directly return 'unanswerable'.\n
+###Question: {question}\n
+###Context: {context}\n
+###Response: """.format(question=question, context=summary)
     return prompt
 
 
@@ -165,36 +161,45 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
     return feedback_sp, token_level_f1_score(feedback_ans, answer)
 
 
-def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
-    feedback_dict = {}
-    feedback_signal, score = generate_feedback(args, feedback_model, tokenizer, summary, question, answer)
-    # print("Feedback: ", feedback_signal)
-    if feedback_signal is None:
-        return None
+def feedback_step(args, tokenizer, feedback_model, summary_samples, question, answer):
+    """
+        return: fact, non_fact, all feedback
+    """
+    feedback_results = []
+    for summary in summary_samples:
+        feedback_signal, score = generate_feedback(args, feedback_model, tokenizer, summary, question, answer)
+        feedback_results.append((feedback_signal, score))
 
-    feedback_dict['score'] = score
-    if score >= args.threshold:
-        feedback_dict['fact'] = feedback_signal
-    else:
-        feedback_dict['non_fact'] = feedback_signal
+    feedback_results.sort(key=lambda x: x[1], reverse=True)
 
-    return feedback_dict
+    min_score, max_score = feedback_results[-1][1], feedback_results[0][1]
+
+    if min_score >= args.threshold:
+        return feedback_results[0][0], None, feedback_results
+    if max_score <= args.threshold:
+        return None, feedback_results[-1][0], feedback_results
+
+    return feedback_results[0][0], feedback_results[-1][0], feedback_results
 
 
 @torch.inference_mode()
 def refine_step(args, tokenizer, base_model, text, feedback):
-    prompt = """
-        Below is a scientific paper. Please write a summary based on facts and non-facts we provide.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
-    """
-    facts = ""
-    for i, fact in enumerate(feedback['facts']):
-        facts += "{num}. {fact}\n".format(num=i, fact=fact)
+    prompt = """Below is a scientific paper paired with feedback. Write a factual consistent summary by memorizing fact 
+and excluding nonfact about each entity.\n ###Paper: {text}\n\n ###Feedback: {feedback}\n ###Summary: """
 
-    non_facts = ""
-    for i, non_fact in enumerate(feedback['non_facts']):
-        non_facts += "{num}. {non_fact}\n".format(num=i, non_fact=non_fact)
+    feedback_content = ""
+    for entity in feedback.keys():
+        fact = feedback[entity][0]
+        non_fact = feedback[entity][1]
 
-    prompt = prompt.format(text=text, facts=facts, non_facts=non_facts)
+        if fact is not None:
+            feedback_content += f"Fact about <e>{entity}<e>: {fact}\n"
+        if non_fact is not None:
+            feedback_content += f"Non-Fact about <e>{entity}<e>: {non_fact}\n"
+
+        feedback_content += "\n"
+
+    prompt = prompt.format(text=text, feedback=feedback_content)
     input_ids = tokenizer(
         prompt,
         max_length=args.max_length,
@@ -205,49 +210,38 @@ def refine_step(args, tokenizer, base_model, text, feedback):
 
     output_ids = base_model.generate(
         input_ids,
-        num_beams=args.num_beams,
+        do_sample=True,
+        no_repeat_ngram_size=3,
+        top_k=50,
+        top_p=0.9,
         max_new_tokens=args.gen_max_new_tokens,
         min_new_tokens=args.gen_min_new_tokens,
-        temperature=args.temperature
+        temperature=args.temperature,
+        num_return_sequences=args.num_samples_per_step
     )
 
-    if base_model.config.is_encoder_decoder:
-        output = tokenizer.decode(output_ids[0], skip_special_tokens=True,
-                                  clean_up_tokenization_spaces=True)
+    summary_samples = []
+    if not base_model.config.is_encoder_decoder:
+        for output in output_ids:
+            pred_summary = base_tokenizer.decode(output[len(input_ids[0]):], skip_special_tokens=True,
+                                                 clean_up_tokenization_spaces=True)
+            summary_samples.append(pred_summary)
     else:
-        output = tokenizer.decode(output_ids[0][len(input_ids):], skip_special_tokens=True,
-                                  clean_up_tokenization_spaces=True)
-    return output
-
-
-def create_mini_batch(indices, mini_batch_size):
-    if mini_batch_size <= len(indices):
-        return random.sample(indices, mini_batch_size)
-    else:
-        return indices
-
-
-def similarity_filter(new_feedback, old_feedbacks):
-    p = nlp(new_feedback)
-    for of in old_feedbacks:
-        q = nlp(of)
-        similarity = p.similarity(q)
-        if similarity > 0.8:
-            return False
-    return True
+        for output in output_ids:
+            pred_summary = base_tokenizer.decode(output, skip_special_tokens=True,
+                                                 clean_up_tokenization_spaces=True)
+            summary_samples.append(pred_summary)
+    return summary_samples
 
 
 @torch.inference_mode()
-def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer, dataset):
+def batched_refine_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer, dataset):
     results_to_save = {}
-    avg_f1_score = 0.0
-    tot_cnt = 0
     with torch.no_grad():
         for example in tqdm(dataset):
             _id = example['id']
             text = example['text'][:6000]
             qa_pairs = example['qa_pairs']
-            gold_summary = example['summary']
 
             results_to_save[_id] = []
 
@@ -265,131 +259,47 @@ def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, f
 
             output_ids = base_model.generate(
                 input_ids,
-                num_beams=args.num_beams,
+                do_sample=True,
+                no_repeat_ngram_size=3,
+                top_k=50,
+                top_p=0.9,
                 max_new_tokens=args.gen_max_new_tokens,
                 min_new_tokens=args.gen_min_new_tokens,
-                temperature=args.temperature
+                temperature=args.temperature,
+                num_return_sequences=args.num_samples_per_step
             )
 
+            summary_samples = []
             if not base_model.config.is_encoder_decoder:
-                pred_summary = base_tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
-                                                     clean_up_tokenization_spaces=True)
+                for output in output_ids:
+                    pred_summary = base_tokenizer.decode(output[len(input_ids[0]):], skip_special_tokens=True,
+                                                         clean_up_tokenization_spaces=True)
+                    summary_samples.append(pred_summary)
             else:
-                pred_summary = base_tokenizer.decode(output_ids[0], skip_special_tokens=True,
-                                                     clean_up_tokenization_spaces=True)
+                for output in output_ids:
+                    pred_summary = base_tokenizer.decode(output, skip_special_tokens=True,
+                                                         clean_up_tokenization_spaces=True)
+                    summary_samples.append(pred_summary)
 
-            feedback = {'facts': [], 'non_facts': []}
-            indices = list(range(len(qa_pairs)))
-            best_score = 0
-            for i in range(args.num_correction_steps):
-                curr_batch = create_mini_batch(indices, args.correction_batch_size)
-                batch_scores = 0
-                batch_cnt = 0
-                for j in curr_batch:
-                    question, answer = qa_pairs[j][0], qa_pairs[j][1]
-                    feedback_dict = feedback_step(args, feedback_tokenizer, feedback_model, pred_summary, question,
-                                                  answer)
-                    if feedback_dict is None or feedback_dict['score'] == 0:
-                        continue
-                    # max_score_for_cur_example = max(max_score_for_cur_example, feedback_dict['score'])
+            selected_feedback = {}
+            full_feedback = {}
+            for step, pair in enumerate(qa_pairs):
+                question, answer = pair
 
-                    if "fact" in feedback_dict:
-                        if similarity_filter(feedback_dict['fact'], feedback['facts']):
-                            feedback['facts'].append(feedback_dict['fact'])
-                    elif "non_fact" in feedback_dict:
-                        if similarity_filter(feedback_dict['non_fact'], feedback['non_facts']):
-                            feedback['non_facts'].append(feedback_dict['non_fact'])
-                    batch_scores += feedback_dict['score']
-                    batch_cnt += 1
+                fact, non_fact, all_feedback = feedback_step(args, feedback_tokenizer, feedback_model, summary_samples,
+                                                             question, answer)
 
-                if batch_cnt > 0:
-                    batch_avg_score = batch_scores / batch_cnt
-                    best_score = max(best_score, batch_avg_score)
-                    results_to_save[_id].append({
-                        'output': pred_summary,
-                        'feedback': feedback,
-                        'f1-score': batch_avg_score
-                    })
-                    pred_summary = refine_step(args, base_tokenizer, base_model, text, feedback)
+                selected_feedback[answer] = (fact, non_fact)
 
-            if best_score > 0:
-                avg_f1_score += best_score
-                tot_cnt += 1
-    print("Average F1 score after self-correction is: ", avg_f1_score / tot_cnt)
-    return results_to_save
+                full_feedback[str(step)] = all_feedback
 
+                results_to_save[_id].append({
+                    'outputs': summary_samples,
+                    'selected_feedback': copy.deepcopy(selected_feedback),
+                    'full_feedback': copy.deepcopy(full_feedback)
+                })
 
-@torch.inference_mode()
-def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
-    results_to_save = {}
-    avg_f1_score = 0.0
-    tot_cnt = 0
-    with torch.no_grad():
-        for example in tqdm(dataset):
-            _id = example['id']
-            text = example['text'][:6000]
-            qa_pairs = example['qa_pairs']
-            gold_summary = example['summary']
-
-            results_to_save[_id] = []
-
-            initial_prompt = """
-                Please summarize the following scientific document.\n###Paper: {text}\n###Summary:
-            """.format(text=text)
-
-            input_ids = tokenizer(
-                initial_prompt,
-                max_length=args.max_length,
-                padding='max_length',
-                truncation=True,
-                return_tensors='pt'
-            ).input_ids.cuda()
-
-            output_ids = base_model.generate(
-                input_ids,
-                num_beams=args.num_beams,
-                max_new_tokens=args.gen_max_new_tokens,
-                min_new_tokens=args.gen_min_new_tokens,
-                temperature=args.temperature
-            )
-
-            if base_model.config.is_encoder_decoder:
-                pred_summary = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-            else:
-                pred_summary = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True)
-            feedback = {'facts': [], 'non_facts': []}
-            prev_score = 0
-            max_score_for_cur_example = 0.0
-            for question, answer in qa_pairs:
-                # print("Summary: ", pred_summary)
-                # print("Score: ", avg_score_for_cur_example)
-                feedback_dict = feedback_step(args, tokenizer, feedback_model, pred_summary, question, answer)
-                if feedback_dict is None:
-                    continue
-                max_score_for_cur_example = max(max_score_for_cur_example, feedback_dict['score'])
-
-                if "fact" in feedback_dict:
-                    feedback['facts'].append(feedback_dict['fact'])
-                    results_to_save[_id].append({
-                        'output': pred_summary,
-                        'fact': feedback_dict['fact'],
-                        'f1-score': feedback_dict['score']
-                    })
-                elif "non_fact" in feedback_dict:
-                    feedback['non_facts'].append(feedback_dict['non_fact'])
-                    results_to_save[_id].append({
-                        'output': pred_summary,
-                        'non_fact': feedback_dict['non_fact'],
-                        'f1-score': feedback_dict['score']
-                    })
-
-                pred_summary = refine_step(args, tokenizer, base_model, text, feedback)
-
-            if max_score_for_cur_example > 0:
-                avg_f1_score += max_score_for_cur_example
-                tot_cnt += 1
-
-    print("Average F1 score after self-correction is: ", avg_f1_score / tot_cnt)
+                summary_samples = refine_step(args, base_tokenizer, base_model, text, selected_feedback)
     return results_to_save
 
 
@@ -413,7 +323,8 @@ if __name__ == '__main__':
     parser.add_argument("--gen_min_new_tokens", type=int, default=100)
     parser.add_argument("--gen_max_new_tokens", type=int, default=200)
     parser.add_argument("--num_beams", type=int, default=2)
-    parser.add_argument("--temperature", type=int, default=1.3)
+    parser.add_argument("--temperature", type=int, default=0.8)
+    parser.add_argument("--num_samples_per_step", type=int, default=5)
     parser.add_argument("--use_8bit", type=bool, default=True)
     parser.add_argument("--threshold", type=float, default=0.3)
     parser.add_argument("--patience", type=float, default=0.01)
@@ -429,8 +340,8 @@ if __name__ == '__main__':
 
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
-    results_to_save = batched_correction_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer,
-                                               dataset.select(range(2)))
+    results_to_save = batched_refine_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer,
+                                           dataset.select(range(10)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)
