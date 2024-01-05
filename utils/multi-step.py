@@ -6,29 +6,23 @@ plt.rcParams['font.size'] = 36  # 坐标轴字号为16
 plt.rcParams["font.weight"] = "bold"
 plt.rcParams["axes.labelweight"] = "bold"
 
-# with open("/mnt/data/zekai/batched_correction_results_300.json", "r") as f:
-#     data_ft = json.load(f)
+with open("../../ExperimentResults/refine_vicuna_qags_scores.json", "r") as f:
+    qags_vicuna = json.load(f)
 
-# with open("finetune_vs_non_finetune.json", "r") as f:
-#     data_non_ft = json.load(f)
+with open("../../ExperimentResults/refine_llama2_qags_scores.json", "r") as f:
+    qags_llama2 = json.load(f)
 
-with open("../../Report/batched_correction_results_300.json", "r") as f:
-    data = json.load(f)
+with open("../../ExperimentResults/refine_flan_t5_qags_scores.json", "r") as f:
+    qags_flan_t5 = json.load(f)
 
-with open("../../Report/batched_correction_results_300_500.json", "r") as f:
-    _data = json.load(f)
+with open("../../ExperimentResults/quest_eval_results_vicuna.json", "r") as f:
+    quest_eval_vicuna = json.load(f)
 
-data.update(_data)
-# with open("correction_results_300.json", "r") as f:
-#     data_300 = json.load(f)
+with open("../../ExperimentResults/quest_eval_results_llama2.json", "r") as f:
+    quest_eval_llama2 = json.load(f)
 
-# with open("correction_results_400.json", "r") as f:
-#     data_400 = json.load(f)
-
-# with open("correction_results_500.json", "r") as f:
-#     data_500 = json.load(f)
-
-step_to_scores = {}
+with open("../../ExperimentResults/quest_eval_results_flan_t5.json", "r") as f:
+    quest_eval_flan_t5 = json.load(f)
 
 
 def total_score(data):
@@ -46,33 +40,31 @@ def total_score(data):
 
 
 def scores_with_steps(data, step):
-    score = 0
+    tot_score = 0
     cnt = 0
     for i, key in enumerate(data):
         max_score = 0
-        for j, gen in enumerate(data[key]):
+        for j, score in enumerate(data[key]):
             if j > step:
                 break
-            max_score = max(max_score, gen['f1-score'])
+            max_score = max(max_score, score)
         if max_score > 0:
-            score += max_score
+            tot_score += max_score
             cnt += 1
-    return score / cnt
-
-# print(total_score(data_ft)[0] / 300, total_score(data_ft)[1] / 300)
-# print(total_score(data_non_ft)[0] / 50, total_score(data_non_ft)[1] / 50)
-# scores = total_score(data_100) + total_score(data_200) + total_score(data_300) + total_score(data_400) + total_score(data_500)
-# print(scores / 500)
-# score, cnt = total_score(data)
-# print(score / cnt)
+    return tot_score / cnt
 
 
 steps = range(8)
-scores = [scores_with_steps(data, step) for step in steps]
+vicuna_scores = [scores_with_steps(quest_eval_vicuna, step) for step in steps]
+llama2_scores = [scores_with_steps(quest_eval_llama2, step) for step in steps]
+flan_t5_scores = [scores_with_steps(quest_eval_flan_t5, step) for step in steps]
 
 plt.figure(figsize=(18, 12))
 plt.xlabel("steps")
-plt.ylabel("score")
-plt.plot([step + 1 for step in steps], scores, marker='^', linewidth=4, markersize=20)
+plt.ylabel("QuestEval scores")
+plt.plot([step + 1 for step in steps], vicuna_scores, marker='^', linewidth=4, markersize=20, label='vicuna')
+plt.plot([step + 1 for step in steps], llama2_scores, marker='^', linewidth=4, markersize=20, label='llama2')
+plt.plot([step + 1 for step in steps], flan_t5_scores, marker='^', linewidth=4, markersize=20, label='flan-t5')
 plt.grid(linestyle='--')
-plt.savefig("1.pdf")
+plt.legend()
+plt.savefig("quest_eval_multi_step.pdf")
