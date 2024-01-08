@@ -1,5 +1,6 @@
 import json
 import os
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
 import time
 import openai
 import re
@@ -16,7 +17,6 @@ from transformers import LlamaTokenizer, LlamaForCausalLM, T5ForConditionalGener
 from peft import PeftModel, prepare_model_for_int8_training
 import argparse
 
-openai.api_key = "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"
 nlp = spacy.load("en_core_web_sm")
 
 
@@ -290,10 +290,7 @@ if __name__ == '__main__':
     parser.add_argument("--data_path", type=str, default="/path/to/data")
     parser.add_argument("--save_path", type=str, default="/path/to/save")
     parser.add_argument("--base_model_path", type=str, default="/path/to/base/model")
-    parser.add_argument("--feedback_model_path", type=str, default="/path/to/feedback/model")
-    parser.add_argument("--lora_path", type=str, default="/path/to/adapter")
-    parser.add_argument("--resume_from_checkpoint", type=str, default=None)
-    parser.add_argument("--lora_remote_checkpoint", type=str, default=None)
+    parser.add_argument("--openai_api_key", type=str, default="openai api key")
     parser.add_argument("--ignore_data_skip", type=str, default="False")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--max_length", type=int, default=2048)
@@ -314,11 +311,12 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     random.seed(args.seed)
 
+    openai.api_key = args.openai_api_key
     base_tokenizer, base_model = load_base_model(args)
 
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
-    results_to_save = batched_correction_stage(args, base_model, base_tokenizer, dataset.select(range(2)))
+    results_to_save = batched_correction_stage(args, base_model, base_tokenizer, dataset.select(range(50)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)

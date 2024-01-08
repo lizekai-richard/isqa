@@ -1,3 +1,5 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
 import spacy
 import random
 import ipdb
@@ -44,7 +46,7 @@ def prepare_ans_conditional_data(text, n_ans_per_txt=10, use_no_ans=False):
         print("\twithout NO_ANS option!")
 
     print("Extracting entities...")
-    all_anss = extract_ans([text])
+    all_anss = extract_ans(text)
     print("\tDone!")
     print(f"\tMin ans count: {min(len(a) for a in all_anss)}")
     print(f"\tMax ans count: {max(len(a) for a in all_anss)}")
@@ -61,8 +63,9 @@ def prepare_ans_conditional_data(text, n_ans_per_txt=10, use_no_ans=False):
             assert NO_ANS_TOK in anss, ipdb.set_trace()
         else:
             if len(anss) < n_ans_per_txt:
-                extra_anss = random.choices(anss, k=n_ans_per_txt - len(anss))
-                anss += extra_anss
+                # extra_anss = random.choices(anss, k=n_ans_per_txt - len(anss))
+                # anss += extra_anss
+                continue
             if len(anss) > n_ans_per_txt:
                 anss = random.sample(anss, n_ans_per_txt)
             assert len(anss) == n_ans_per_txt, ipdb.set_trace()
@@ -75,13 +78,24 @@ def prepare_ans_conditional_data(text, n_ans_per_txt=10, use_no_ans=False):
     return all_ans, all_txt
 
 
-def generate_qa(summary_text, n_qa_pairs, qg_model_path):
-    model = TransformersQG(language="en", model=qg_model_path)
-    all_ans, all_txt = prepare_ans_conditional_data(summary_text, n_ans_per_txt=n_qa_pairs)
-    questions = model.generate_q(list_context=all_txt, list_answer=all_ans)
-    qa_pairs = model.generate_qa(list_context=summary_text, num_questions=n_qa_pairs)
-    assert len(questions) == len(all_ans)
-    qa_pairs = [[question, answer] for question, answer in zip(questions, all_ans)]
+def generate_answer_candidates(text, n_candidates):
+    all_ans, all_txt = prepare_ans_conditional_data(text=text, n_ans_per_txt=n_candidates)
+    return all_ans
+
+def generate_qa(text, n_qa_pairs, qg_model_path):
+    model = TransformersQG(language="en", model="lmqg/t5-large-squad-qg")
+
+    try:
+        all_ans, all_txt = prepare_ans_conditional_data(text, n_ans_per_txt=n_qa_pairs)
+        questions = model.generate_q(list_context=all_txt, list_answer=all_ans)
+        qa_pairs = [[question, answer] for question, answer in zip(questions, all_ans)]
+    except Exception:
+        qa_pairs = []
+    # try:
+    #     qa_pairs = model.generate_qa(list_context=text, num_questions=n_qa_pairs)
+    # except Exception:
+    #     qa_pairs = []
+    # assert len(questions) == len(all_ans)
+    # qa_pairs = [[question, answer] for question, answer in zip(questions, all_ans)]
 
     return qa_pairs
-
