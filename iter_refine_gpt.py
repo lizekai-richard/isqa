@@ -1,7 +1,7 @@
 import json
 import os
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+import time
+import openai
 import re
 import string
 import random
@@ -16,8 +16,7 @@ from transformers import LlamaTokenizer, LlamaForCausalLM, T5ForConditionalGener
 from peft import PeftModel, prepare_model_for_int8_training
 import argparse
 
-# nlp = spacy.load("/home/users/nus/e0817846/.conda/envs/vicuna/lib/python3.10/site-packages/en_core_web_sm/
-# en_core_web_sm-3.7.0")
+openai.api_key = "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"
 nlp = spacy.load("en_core_web_sm")
 
 
@@ -46,22 +45,6 @@ def load_base_model(args):
         )
         model = prepare_model_for_int8_training(model)
     return tokenizer, model
-
-
-def load_feedback_model(args):
-    feedback_tokenizer = LlamaTokenizer.from_pretrained(args.feedback_model_path)
-    feedback_model = LlamaForCausalLM.from_pretrained(
-        args.feedback_model_path,
-        load_in_8bit=args.use_8bit,
-        device_map='auto'
-    )
-    feedback_model = PeftModel.from_pretrained(
-        feedback_model,
-        args.lora_path,
-        device_map="auto"
-    )
-    feedback_model = prepare_model_for_int8_training(feedback_model)
-    return feedback_tokenizer, feedback_model
 
 
 def normalize_answer(s):
@@ -103,44 +86,26 @@ def token_level_f1_score(pred, label):
     return f1
 
 
-def generate_prompt_for_feedback_model(summary, question):
-    prompt = """Below is a question paired with its context, please return your response in two parts:\n1. the answer 
-                to the question\n2. the most relevant evidence in the context to answer the question.\nIf the question 
-                is unanswerable, directly return 'unanswerable'.\n
-                ###Question: {question}\n
-                ###Context: {context}\n
-                ###Response: """.format(question=question, context=summary)
-    return prompt
-
-
 @torch.inference_mode()
-def generate_feedback(args, model, tokenizer, summary, question, answer):
-    prompt = generate_prompt_for_feedback_model(summary, question)
-    input_ids = tokenizer(
-        prompt,
-        max_length=args.feedback_max_length,
-        padding='max_length',
-        truncation=True,
-        return_tensors='pt'
-    ).input_ids.cuda()
-
-    output_ids = model.generate(
-        input_ids=input_ids,
-        temperature=args.temperature,
-        num_beams=args.num_beams,
-        max_new_tokens=args.fed_max_new_tokens,  # max_length=max_new_tokens+input_sequence
-        min_new_tokens=args.fed_min_new_tokens,  # min_length=min_new_tokens+input_sequence
+def generate_feedback(summary, question, answer):
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are good at answering reading comprehension questions and extracting "
+                                          "corresponding evidence."},
+            {"role": "user", "content": f"""
+                Read the context: {summary}\nPlease answer the following question by: 1.provide the answer 
+                2.provide the evidence sentence in the context. Please use "Answer:" and "Evidence:" to denote these two 
+                parts when generating your response: {question}
+            """}
+        ]
     )
-
-    output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
-                              clean_up_tokenization_spaces=True)
-    # print("Answer+Evidence:", output)
-    if ("unanswerable" or "Unanswerable") in output:
-        return None, 0
+    time.sleep(3)
+    output = response['choices'][0]['message']['content']
 
     ans_index, sp_index = -1, -1
     ans_prefix, sp_prefix = None, None
-    if ("Answer:" or "answer:" or "1.") in output:
+    if "Answer:" in output or "answer:" in output or "1." in output:
         ans_index = output.find("Answer:")
         ans_prefix = "Answer:"
         if ans_index == -1:
@@ -149,7 +114,7 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
         if ans_index == -1:
             ans_index = output.find("1.")
             ans_prefix = "1."
-    if ("Evidence:" or "evidence:" or "2.") in output:
+    if "Evidence:" in output or "evidence:" in output or "2." in output:
         sp_index = output.find("Evidence:")
         sp_prefix = "Evidence:"
         if sp_index == -1:
@@ -166,10 +131,9 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
     return feedback_sp, token_level_f1_score(feedback_ans, answer)
 
 
-def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
+def feedback_step(args, summary, question, answer):
     feedback_dict = {}
-    feedback_signal, score = generate_feedback(args, feedback_model, tokenizer, summary, question, answer)
-    # print("Feedback: ", feedback_signal)
+    feedback_signal, score = generate_feedback(summary, question, answer)
     if feedback_signal is None:
         return None
 
@@ -239,7 +203,7 @@ def similarity_filter(new_feedback, old_feedbacks):
 
 
 @torch.inference_mode()
-def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer, dataset):
+def batched_correction_stage(args, base_model, base_tokenizer, dataset):
     results_to_save = {}
     avg_f1_score = 0.0
     tot_cnt = 0
@@ -288,8 +252,7 @@ def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, f
                 batch_cnt = 0
                 for j in curr_batch:
                     question, answer = qa_pairs[j][0], qa_pairs[j][1]
-                    feedback_dict = feedback_step(args, feedback_tokenizer, feedback_model, pred_summary, question,
-                                                  answer)
+                    feedback_dict = feedback_step(args, pred_summary, question, answer)
                     if feedback_dict is None or feedback_dict['score'] == 0:
                         continue
                     # max_score_for_cur_example = max(max_score_for_cur_example, feedback_dict['score'])
@@ -316,80 +279,6 @@ def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, f
             if best_score > 0:
                 avg_f1_score += best_score
                 tot_cnt += 1
-    print("Average F1 score after self-correction is: ", avg_f1_score / tot_cnt)
-    return results_to_save
-
-
-@torch.inference_mode()
-def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
-    results_to_save = {}
-    avg_f1_score = 0.0
-    tot_cnt = 0
-    with torch.no_grad():
-        for example in tqdm(dataset):
-            _id = example['id']
-            text = example['text'][:6000]
-            qa_pairs = example['qa_pairs']
-            gold_summary = example['summary']
-
-            results_to_save[_id] = []
-
-            initial_prompt = """
-                Please summarize the following scientific document.\n###Paper: {text}\n###Summary:
-            """.format(text=text)
-
-            input_ids = tokenizer(
-                initial_prompt,
-                max_length=args.max_length,
-                padding='max_length',
-                truncation=True,
-                return_tensors='pt'
-            ).input_ids.cuda()
-
-            output_ids = base_model.generate(
-                input_ids,
-                num_beams=args.num_beams,
-                max_new_tokens=args.gen_max_new_tokens,
-                min_new_tokens=args.gen_min_new_tokens,
-                temperature=args.temperature
-            )
-
-            if base_model.config.is_encoder_decoder:
-                pred_summary = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-            else:
-                pred_summary = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True)
-            feedback = {'facts': [], 'non_facts': []}
-            prev_score = 0
-            max_score_for_cur_example = 0.0
-            for question, answer in qa_pairs:
-                # print("Summary: ", pred_summary)
-                # print("Score: ", avg_score_for_cur_example)
-                feedback_dict = feedback_step(args, tokenizer, feedback_model, pred_summary, question, answer)
-                if feedback_dict is None:
-                    continue
-                max_score_for_cur_example = max(max_score_for_cur_example, feedback_dict['score'])
-
-                if "fact" in feedback_dict:
-                    feedback['facts'].append(feedback_dict['fact'])
-                    results_to_save[_id].append({
-                        'output': pred_summary,
-                        'fact': feedback_dict['fact'],
-                        'f1-score': feedback_dict['score']
-                    })
-                elif "non_fact" in feedback_dict:
-                    feedback['non_facts'].append(feedback_dict['non_fact'])
-                    results_to_save[_id].append({
-                        'output': pred_summary,
-                        'non_fact': feedback_dict['non_fact'],
-                        'f1-score': feedback_dict['score']
-                    })
-
-                pred_summary = refine_step(args, tokenizer, base_model, text, feedback)
-
-            if max_score_for_cur_example > 0:
-                avg_f1_score += max_score_for_cur_example
-                tot_cnt += 1
-
     print("Average F1 score after self-correction is: ", avg_f1_score / tot_cnt)
     return results_to_save
 
@@ -426,12 +315,10 @@ if __name__ == '__main__':
     random.seed(args.seed)
 
     base_tokenizer, base_model = load_base_model(args)
-    feedback_tokenizer, feedback_model = load_feedback_model(args)
 
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
-    results_to_save = batched_correction_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer,
-                                               dataset.select(range(2)))
+    results_to_save = batched_correction_stage(args, base_model, base_tokenizer, dataset.select(range(2)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)
