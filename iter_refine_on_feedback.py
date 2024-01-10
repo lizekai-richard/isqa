@@ -140,7 +140,7 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
 
     ans_index, sp_index = -1, -1
     ans_prefix, sp_prefix = None, None
-    if ("Answer:" or "answer:" or "1.") in output:
+    if "Answer:" in output or "answer:" in output or "1." in output:
         ans_index = output.find("Answer:")
         ans_prefix = "Answer:"
         if ans_index == -1:
@@ -149,7 +149,7 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
         if ans_index == -1:
             ans_index = output.find("1.")
             ans_prefix = "1."
-    if ("Evidence:" or "evidence:" or "2.") in output:
+    if "Evidence:" in output or "evidence:" in output or "2." in output:
         sp_index = output.find("Evidence:")
         sp_prefix = "Evidence:"
         if sp_index == -1:
@@ -216,7 +216,7 @@ def refine_step(args, tokenizer, base_model, text, feedback):
         output = tokenizer.decode(output_ids[0], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     else:
-        output = tokenizer.decode(output_ids[0][len(input_ids):], skip_special_tokens=True,
+        output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     return output
 

@@ -96,8 +96,7 @@ def generate_feedback(summary, question, answer):
             {"role": "user", "content": f"""
                 Read the context: {summary}\nPlease answer the following question by: 1.provide the answer 
                 2.provide the evidence sentence in the context. Please use "Answer:" and "Evidence:" to denote these two 
-                parts when generating your response: {question}
-            """}
+                parts when generating your response: {question}"""}
         ]
     )
     time.sleep(3)
@@ -180,7 +179,7 @@ def refine_step(args, tokenizer, base_model, text, feedback):
         output = tokenizer.decode(output_ids[0], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     else:
-        output = tokenizer.decode(output_ids[0][len(input_ids):], skip_special_tokens=True,
+        output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     return output
 
