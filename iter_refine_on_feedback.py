@@ -185,7 +185,7 @@ def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
 @torch.inference_mode()
 def refine_step(args, tokenizer, base_model, text, feedback):
     prompt = """
-        Below is a scientific paper. Please write a summary based on facts and non-facts we provide.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
+        Below is a scientific paper paired with feedback. Please write a summary by memorizing facts and rectifying non-facts.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
     """
     facts = ""
     for i, fact in enumerate(feedback['facts']):
