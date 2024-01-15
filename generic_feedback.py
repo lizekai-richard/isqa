@@ -23,10 +23,6 @@ def load_base_model(args):
     if "t5" not in args.base_model_path:
         tokenizer = LlamaTokenizer.from_pretrained(args.base_model_path)
 
-        if ("llama" or "vicuna") in args.base_model_path:
-            tokenizer.pad_token = tokenizer.unk_token
-            tokenizer.padding_side = "left"
-
         model = LlamaForCausalLM.from_pretrained(
             args.base_model_path,
             load_in_8bit=args.use_8bit,
@@ -138,7 +134,7 @@ def refine_step(args, tokenizer, base_model, text, feedback):
         output = tokenizer.decode(output_ids[0], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     else:
-        output = tokenizer.decode(output_ids[0][len(input_ids):], skip_special_tokens=True,
+        output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     return output
 
