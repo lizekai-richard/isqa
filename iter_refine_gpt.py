@@ -1,13 +1,13 @@
 import json
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
+os.environ["CUDA_VISIBLE_DEVICES"]="1,3"
 import time
-import openai
 import re
 import string
 import random
 import torch
 import spacy
+from openai import OpenAI
 from collections import Counter
 from tqdm import tqdm
 from torch.utils.data import Dataset
@@ -21,7 +21,7 @@ nlp = spacy.load("en_core_web_sm")
 
 
 def load_base_model(args):
-    if "vicuna" in args.base_model_path or "llama" in args.base_model_path:
+    if ("vicuna" in args.base_model_path) or ("llama" in args.base_model_path):
         tokenizer = LlamaTokenizer.from_pretrained(args.base_model_path)
 
         tokenizer.pad_token = tokenizer.unk_token
@@ -87,8 +87,8 @@ def token_level_f1_score(pred, label):
 
 
 @torch.inference_mode()
-def generate_feedback(summary, question, answer):
-    response = openai.ChatCompletion.create(
+def generate_feedback(openai_client, summary, question, answer):
+    response = openai_client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are good at answering reading comprehension questions and extracting "
@@ -96,12 +96,11 @@ def generate_feedback(summary, question, answer):
             {"role": "user", "content": f"""
                 Read the context: {summary}\nPlease answer the following question by: 1.provide the answer 
                 2.provide the evidence sentence in the context. Please use "Answer:" and "Evidence:" to denote these two 
-                parts when generating your response: {question}
-            """}
+                parts when generating your response: {question}"""}
         ]
     )
     time.sleep(3)
-    output = response['choices'][0]['message']['content']
+    output = response.choices[0].message.content
 
     ans_index, sp_index = -1, -1
     ans_prefix, sp_prefix = None, None
@@ -131,9 +130,9 @@ def generate_feedback(summary, question, answer):
     return feedback_sp, token_level_f1_score(feedback_ans, answer)
 
 
-def feedback_step(args, summary, question, answer):
+def feedback_step(args, openai_client, summary, question, answer):
     feedback_dict = {}
-    feedback_signal, score = generate_feedback(summary, question, answer)
+    feedback_signal, score = generate_feedback(openai_client, summary, question, answer)
     if feedback_signal is None:
         return None
 
@@ -149,7 +148,7 @@ def feedback_step(args, summary, question, answer):
 @torch.inference_mode()
 def refine_step(args, tokenizer, base_model, text, feedback):
     prompt = """
-        Below is a scientific paper. Please write a summary based on facts and non-facts we provide.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
+        Below is a scientific paper paired with feedback. Please write a summary by memorizing facts and rectifying non-facts.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
     """
     facts = ""
     for i, fact in enumerate(feedback['facts']):
@@ -180,7 +179,7 @@ def refine_step(args, tokenizer, base_model, text, feedback):
         output = tokenizer.decode(output_ids[0], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     else:
-        output = tokenizer.decode(output_ids[0][len(input_ids):], skip_special_tokens=True,
+        output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     return output
 
@@ -203,7 +202,7 @@ def similarity_filter(new_feedback, old_feedbacks):
 
 
 @torch.inference_mode()
-def batched_correction_stage(args, base_model, base_tokenizer, dataset):
+def batched_correction_stage(args, base_model, base_tokenizer, openai_client, dataset):
     results_to_save = {}
     avg_f1_score = 0.0
     tot_cnt = 0
@@ -242,7 +241,7 @@ def batched_correction_stage(args, base_model, base_tokenizer, dataset):
             else:
                 pred_summary = base_tokenizer.decode(output_ids[0], skip_special_tokens=True,
                                                      clean_up_tokenization_spaces=True)
-
+            print(pred_summary)
             feedback = {'facts': [], 'non_facts': []}
             indices = list(range(len(qa_pairs)))
             best_score = 0
@@ -252,7 +251,7 @@ def batched_correction_stage(args, base_model, base_tokenizer, dataset):
                 batch_cnt = 0
                 for j in curr_batch:
                     question, answer = qa_pairs[j][0], qa_pairs[j][1]
-                    feedback_dict = feedback_step(args, pred_summary, question, answer)
+                    feedback_dict = feedback_step(args, openai_client, pred_summary, question, answer)
                     if feedback_dict is None or feedback_dict['score'] == 0:
                         continue
                     # max_score_for_cur_example = max(max_score_for_cur_example, feedback_dict['score'])
@@ -311,12 +310,14 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     random.seed(args.seed)
 
-    openai.api_key = args.openai_api_key
+    
     base_tokenizer, base_model = load_base_model(args)
-
+    client = OpenAI(
+        api_key=args.openai_api_key
+    )
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
-    results_to_save = batched_correction_stage(args, base_model, base_tokenizer, dataset.select(range(50)))
+    results_to_save = batched_correction_stage(args, base_model, base_tokenizer, client, dataset.select(range(5)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)
