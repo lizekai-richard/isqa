@@ -1,6 +1,5 @@
 import json
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="1,3"
 import time
 import re
 import string
@@ -16,7 +15,7 @@ from datasets import load_dataset
 from transformers import LlamaTokenizer, LlamaForCausalLM, T5ForConditionalGeneration, T5Tokenizer
 from peft import PeftModel, prepare_model_for_int8_training
 import argparse
-
+os.environ["CUDA_VISIBLE_DEVICES"]="1,3"
 nlp = spacy.load("en_core_web_sm")
 
 
@@ -202,7 +201,7 @@ def similarity_filter(new_feedback, old_feedbacks):
 
 
 @torch.inference_mode()
-def batched_correction_stage(args, base_model, base_tokenizer, openai_client, dataset):
+def batched_refine_stage(args, base_model, base_tokenizer, openai_client, dataset):
     results_to_save = {}
     avg_f1_score = 0.0
     tot_cnt = 0
@@ -241,7 +240,7 @@ def batched_correction_stage(args, base_model, base_tokenizer, openai_client, da
             else:
                 pred_summary = base_tokenizer.decode(output_ids[0], skip_special_tokens=True,
                                                      clean_up_tokenization_spaces=True)
-            print(pred_summary)
+
             feedback = {'facts': [], 'non_facts': []}
             indices = list(range(len(qa_pairs)))
             best_score = 0
@@ -282,6 +281,46 @@ def batched_correction_stage(args, base_model, base_tokenizer, openai_client, da
     return results_to_save
 
 
+@torch.inference_mode()
+def gpt_as_feedback_module_refine_stage(args, base_tokenizer, base_model, client, dataset):
+    with torch.no_grad():
+
+        for example in tqdm(dataset):
+            _id = example['id']
+            text = example['text'][:6000]
+
+            messages = []
+            results_to_save[_id] = []
+
+            initial_prompt = """Please summarize the following scientific document.\n###Paper: {text}\n###Summary: """\
+                .format(text=text)
+
+            input_ids = base_tokenizer(
+                initial_prompt,
+                max_length=args.max_length,
+                padding='max_length',
+                truncation=True,
+                return_tensors='pt'
+            ).input_ids.cuda()
+
+            output_ids = base_model.generate(
+                input_ids,
+                num_beams=args.num_beams,
+                max_new_tokens=args.gen_max_new_tokens,
+                min_new_tokens=args.gen_min_new_tokens,
+                temperature=args.temperature
+            )
+
+            if not base_model.config.is_encoder_decoder:
+                pred_summary = base_tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
+                                                     clean_up_tokenization_spaces=True)
+            else:
+                pred_summary = base_tokenizer.decode(output_ids[0], skip_special_tokens=True,
+                                                     clean_up_tokenization_spaces=True)
+
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb", default=False)
@@ -310,14 +349,13 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     random.seed(args.seed)
 
-    
     base_tokenizer, base_model = load_base_model(args)
     client = OpenAI(
         api_key=args.openai_api_key
     )
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
-    results_to_save = batched_correction_stage(args, base_model, base_tokenizer, client, dataset.select(range(5)))
+    results_to_save = batched_refine_stage(args, base_model, base_tokenizer, client, dataset.select(range(5)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)

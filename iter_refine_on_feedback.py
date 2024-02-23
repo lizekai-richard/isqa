@@ -1,6 +1,5 @@
 import json
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,3"
 import re
 import string
 import random
@@ -16,8 +15,6 @@ from transformers import LlamaTokenizer, LlamaForCausalLM, T5ForConditionalGener
 from peft import PeftModel, prepare_model_for_int8_training
 import argparse
 
-# nlp = spacy.load("/home/users/nus/e0817846/.conda/envs/vicuna/lib/python3.10/site-packages/en_core_web_sm/
-# en_core_web_sm-3.7.0")
 nlp = spacy.load("en_core_web_sm")
 
 
@@ -50,6 +47,8 @@ def load_base_model(args):
 
 def load_feedback_model(args):
     feedback_tokenizer = LlamaTokenizer.from_pretrained(args.feedback_model_path)
+    feedback_tokenizer.pad_token_id = 0
+
     feedback_model = LlamaForCausalLM.from_pretrained(
         args.feedback_model_path,
         load_in_8bit=args.use_8bit,
@@ -104,10 +103,11 @@ def token_level_f1_score(pred, label):
 
 
 def generate_prompt_for_feedback_model(summary, question):
-    prompt = """Below is a question paired with its context, please return your response in two parts:\n1. the answer to the question\n2. the most relevant evidence in the context to answer the question.\nIf the question is unanswerable, directly return 'unanswerable'.\n
-###Question: {question}\n
-###Context: {context}\n
+    prompt = """Below is a question paired with its context, please return your response in two parts:\n1. the answer to the question\n2. the most relevant evidence in the context to answer the question.\nIf the question is unanswerable, directly return 'unanswerable'.
+###Question: {question}
+###Context: {context}
 ###Response: """.format(question=question, context=summary)
+
     return prompt
 
 
@@ -133,7 +133,7 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
     output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                               clean_up_tokenization_spaces=True)
     # print("Answer+Evidence:", output)
-    if ("unanswerable" or "Unanswerable") in output:
+    if "unanswerable" in output or "Unanswerable" in output:
         return None, 0
 
     ans_index, sp_index = -1, -1
@@ -161,7 +161,19 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
         return None, 0
     feedback_ans = output[ans_index + len(ans_prefix): sp_index]
     feedback_sp = output[sp_index + len(sp_prefix):]
-    return feedback_sp, token_level_f1_score(feedback_ans, answer)
+
+    avg_f1_scores = 0.0
+    can_ans_cnt = 0
+    for a in answer:
+        score = token_level_f1_score(feedback_ans, a)
+        if score > 0:
+            avg_f1_scores += score
+            can_ans_cnt += 1
+    if can_ans_cnt > 0:
+        avg_f1_scores /= can_ans_cnt
+
+    # return feedback_sp, token_level_f1_score(feedback_ans, answer)
+    return feedback_sp, avg_f1_scores
 
 
 def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
@@ -182,20 +194,12 @@ def feedback_step(args, tokenizer, feedback_model, summary, question, answer):
 
 @torch.inference_mode()
 def refine_step(args, tokenizer, base_model, text, feedback):
+    # prompt = """
+    #     Below is a scientific paper. Please summarize the paper based on the provided facts and non-facts.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
+    # """
     prompt = """
         Below is a scientific paper paired with feedback. Please write a summary by memorizing facts and rectifying non-facts.\n###Paper: {text}\n###Facts: {facts}\n###Non-Facts: {non_facts}\n###Summary:
     """
-    # prompt = """
-    #     <s>[INST] 
-    #     <<SYS>>
-    #     You are helpful assistant in following feedback. Below is a scientific article paired with feedback of facts and nonfacts. Please write a summary the given scientific paper by memorizing facts and rectifying nonfacts.
-    #     <</SYS>>
-    #     ###Paper: {text}
-    #     ###Facts: {facts}
-    #     ###Non-Facts: {non_facts}
-    #     [/INST]
-    # """.format(text=text)
-    
     facts = ""
     for i, fact in enumerate(feedback['facts']):
         facts += "{num}. {fact}\n".format(num=i, fact=fact)
@@ -221,11 +225,11 @@ def refine_step(args, tokenizer, base_model, text, feedback):
         temperature=args.temperature
     )
 
-    if base_model.config.is_encoder_decoder:
-        output = tokenizer.decode(output_ids[0], skip_special_tokens=True,
+    if not base_model.config.is_encoder_decoder:
+        output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     else:
-        output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
+        output = tokenizer.decode(output_ids[0], skip_special_tokens=True,
                                   clean_up_tokenization_spaces=True)
     return output
 
@@ -247,11 +251,20 @@ def similarity_filter(new_feedback, old_feedbacks):
     return True
 
 
+def clean_up_prediction(pred):
+    if "###Paper:" in pred:
+        pred = pred.replace("###Paper:", "")
+    if "\u25b6\ufe0f" in pred:
+        pred = pred.replace("\u25b6\ufe0f", "")
+    return pred.strip()
+
+
 @torch.inference_mode()
 def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer, dataset):
     results_to_save = {}
     avg_f1_score = 0.0
     tot_cnt = 0
+    cnt = 0
     with torch.no_grad():
         for example in tqdm(dataset):
             _id = example['id']
@@ -264,15 +277,6 @@ def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, f
             initial_prompt = """
                 Please summarize the following scientific document.\n###Paper: {text}\n###Summary:
             """.format(text=text)
-
-            # initial_prompt = """
-            #     <s>[INST] 
-            #     <<SYS>>
-            #     You are helpful assistant in summarizing scientific documents. Please summarize the given scientific paper.
-            #     <</SYS>>
-            #     {text}
-            #     [/INST]
-            # """.format(text=text)
 
             input_ids = base_tokenizer(
                 initial_prompt,
@@ -291,12 +295,12 @@ def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, f
             )
 
             if not base_model.config.is_encoder_decoder:
-                pred_summary = base_tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
-                                                     clean_up_tokenization_spaces=True)
+                pred_summary = base_tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True)
             else:
-                pred_summary = base_tokenizer.decode(output_ids[0], skip_special_tokens=True,
-                                                     clean_up_tokenization_spaces=True)
-
+                # print("Reaching here...")
+                pred_summary = base_tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            pred_summary = clean_up_prediction(pred_summary)
+            # print(pred_summary)
             feedback = {'facts': [], 'non_facts': []}
             indices = list(range(len(qa_pairs)))
             best_score = 0
@@ -334,7 +338,8 @@ def batched_correction_stage(args, base_model, base_tokenizer, feedback_model, f
             if best_score > 0:
                 avg_f1_score += best_score
                 tot_cnt += 1
-    # print("Average F1 score after self-correction is: ", avg_f1_score / tot_cnt)
+
+    print("Average F1 score after self-correction is: ", avg_f1_score / tot_cnt)
     return results_to_save
 
 
@@ -343,6 +348,7 @@ def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
     results_to_save = {}
     avg_f1_score = 0.0
     tot_cnt = 0
+    cnt = 0
     with torch.no_grad():
         for example in tqdm(dataset):
             _id = example['id']
@@ -372,16 +378,16 @@ def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
                 temperature=args.temperature
             )
 
-            if base_model.config.is_encoder_decoder:
-                pred_summary = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-            else:
+            if not base_model.config.is_encoder_decoder:
                 pred_summary = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True)
-            
-            print(pred_summary)
+            else:
+                pred_summary = tokenizer.decode(output_ids[0], skip_special_tokens=True)
             feedback = {'facts': [], 'non_facts': []}
-
+            prev_score = 0
             max_score_for_cur_example = 0.0
             for question, answer in qa_pairs:
+                # print("Summary: ", pred_summary)
+                # print("Score: ", avg_score_for_cur_example)
                 feedback_dict = feedback_step(args, tokenizer, feedback_model, pred_summary, question, answer)
                 if feedback_dict is None:
                     continue
@@ -408,7 +414,12 @@ def correction_stage(args, base_model, tokenizer, feedback_model, dataset):
                 avg_f1_score += max_score_for_cur_example
                 tot_cnt += 1
 
-    print("Average F1 score after self-correction is: ", avg_f1_score / tot_cnt)
+            cnt += 1
+            if cnt == 300:
+                break
+
+    if tot_cnt > 0:
+        print("Average F1 score after self-correction is: ", avg_f1_score / tot_cnt)
     return results_to_save
 
 
@@ -428,7 +439,7 @@ if __name__ == '__main__':
     parser.add_argument("--max_length", type=int, default=2048)
     parser.add_argument("--feedback_max_length", type=int, default=512)
     parser.add_argument("--fed_min_new_tokens", type=int, default=1)
-    parser.add_argument("--fed_max_new_tokens", type=int, default=100)
+    parser.add_argument("--fed_max_new_tokens", type=int, default=150)
     parser.add_argument("--gen_min_new_tokens", type=int, default=100)
     parser.add_argument("--gen_max_new_tokens", type=int, default=200)
     parser.add_argument("--num_beams", type=int, default=2)
@@ -443,13 +454,17 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     random.seed(args.seed)
 
+    print(args.base_model_path)
+    print(args.save_path)
     base_tokenizer, base_model = load_base_model(args)
     feedback_tokenizer, feedback_model = load_feedback_model(args)
 
-    dataset = load_dataset("json", data_files=args.data_path)['train']
-    # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
+    # dataset = load_dataset("json", data_files=args.data_path)['train']
+    with open(args.data_path, "r") as f:
+        dataset = json.load(f)
+
     results_to_save = batched_correction_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer,
-                                               dataset.select(range(300, len(dataset))))
+                                               dataset)
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)
