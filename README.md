@@ -7,8 +7,8 @@ This is the repo for ACL 2024 submission *ISQA: Informative Factuality Feedback 
 Download the repo:
 
 ```bash
-git clone https://github.com/mt69JMMW/code-to-release.git
-cd code-to-release
+git clone https://lizekai-richard/isqa.git
+cd isqa
 ```
 
 Setup the environment
