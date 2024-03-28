@@ -17,7 +17,7 @@ Setup the environment
 pip install -r requirements.txt
 ```
 
-**Datasets will be released soon**.
+Datasets can be downloaded via https://drive.google.com/drive/folders/1W8JpvXnpZaiAtvZlQ_vFzo5Q3dT7pY1n?usp=sharing
 
 ## ISQA
 
@@ -45,13 +45,15 @@ CUDA_VISIBLE_DEVICES=${TOT_CUDA} torchrun --nproc_per_node=$CUDA_NUM --master_po
 
 This is encapsulated in `scripts/finetune.sh`
 
+We also release the lora weights here https://drive.google.com/drive/folders/1W8JpvXnpZaiAtvZlQ_vFzo5Q3dT7pY1n?usp=sharing. Refer to the `feedback_model_7b` .
+
 ### Baseline
 
 To get zero-shot summarization results on the dataset, run
 
 ```bash
-DATA_PATH="/path/to/your/data"
-MODEL_PATH="/path/to/your/model"
+DATA_PATH="./data/generator_data_scimrc" # change to qasper for experiments on QASPER
+MODEL_PATH="./llm/llama2-chat-7b-hf"
 OUTPUT_PATH="/path/to/your/output"
 
 python3 baseline.py \
@@ -71,10 +73,10 @@ This is encapsulated in `scripts/baseline.sh`
 To employ ISQA feedback for ehancing the summarization factuality, please run
 
 ```bash
-DATA_PATH="/path/to/your/data"
-BASE_MODEL_PATH="/path/to/your/base/llm"
-FEEDBACK_MODEL_PATH="/path/to/your/feedback/llm"
-LORA_PATH="/path/to/your/feedback/model/lora/weights"
+DATA_PATH="./data/generator_data_scimrc"
+BASE_MODEL_PATH="./llm/llama2-chat-7b-hf"
+FEEDBACK_MODEL_PATH="./llm/vicuna-7b-v1.3"
+LORA_PATH="./feedback_model_7b/checkpoint-600"
 OUTPUT_PATH="/path/to/your/output"
 
 python3 iter_refine_on_feedback.py \
@@ -99,7 +101,7 @@ To evaluate the factuality of either baseline or refined summaries, run
 
 ```bash
 MODEL_PATH="sjrhuschlee/flan-t5-large-squad2"
-DATA_PATH="/path/to/your/data"
+DATA_PATH="./data/generator_data_scimrc"
 PREDICTION_PATH="/path/to/your/output"
 SAVE_PATH="/path/to/saved/scores"
 QG_MODEL_PATH="lmqg/t5-large-squad-qg"
@@ -118,3 +120,4 @@ python3 metrics.py \
 
 This is encapsulated in `scripts/metric.sh`
 
+For QuestEval, please refer to https://github.com/ThomasScialom/QuestEval.
