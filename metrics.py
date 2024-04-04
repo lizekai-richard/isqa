@@ -1,4 +1,5 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"]="1,2,3"
 import json
 import random
 import re
@@ -10,7 +11,6 @@ from tqdm import tqdm
 from torchmetrics.text.rouge import ROUGEScore
 from transformers import pipeline, T5Tokenizer, T5ForConditionalGeneration
 from utils.generate_qa_pairs import generate_qa
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
 
 
 class QAGSMetric:
@@ -275,12 +275,16 @@ class RougeMetric:
 class TrueTeacher:
 
     def __init__(self, args):
+        self.device = torch.device("cuda:3")
         self.save_path = args.save_path
         self.prompt = "premise: {p}\nhypothesis: {h}"
         self.max_length = args.max_length
 
         self.tokenizer = T5Tokenizer.from_pretrained(args.model_path)
-        self.model = T5ForConditionalGeneration.from_pretrained(args.model_path)
+        self.model = T5ForConditionalGeneration.from_pretrained(
+            args.model_path,
+            device_map="auto"
+        )
 
         self.saved_results = {}
     
@@ -303,8 +307,8 @@ class TrueTeacher:
                 return_tensors='pt',
                 truncation=True,
                 max_length=self.max_length
-            ).input_ids
-            decoder_input_ids = torch.tensor([[self.tokenizer.pad_token_id]])
+            ).input_ids.cuda()
+            decoder_input_ids = torch.tensor([[self.tokenizer.pad_token_id]]).cuda()
             outputs = self.model(input_ids=input_ids, decoder_input_ids=decoder_input_ids)
             logits = outputs.logits
             probs = torch.softmax(logits[0], dim=-1)
@@ -316,7 +320,7 @@ class TrueTeacher:
         avg_scores /= len(predictions)
         return avg_scores
     
-    def compute_metrics_from_refine(self, data, prediction):
+    def compute_metrics_from_refine(self, data, predictions):
 
         tot_scores = 0.0
         cnt = 0
@@ -341,8 +345,8 @@ class TrueTeacher:
                     return_tensors='pt',
                     truncation=True,
                     max_length=self.max_length
-                ).input_ids
-                decoder_input_ids = torch.tensor([[self.tokenizer.pad_token_id]])
+                ).input_ids.cuda()
+                decoder_input_ids = torch.tensor([[self.tokenizer.pad_token_id]]).cuda()
                 outputs = self.model(input_ids=input_ids, decoder_input_ids=decoder_input_ids)
                 logits = outputs.logits
                 probs = torch.softmax(logits[0], dim=-1)
@@ -389,29 +393,29 @@ if __name__ == '__main__':
     with open(args.prediction_path, "r") as f:
         predictions = json.load(f)
 
-    qags = QAGSMetric(args)
+    # qags = QAGSMetric(args)
     true_teacher = TrueTeacher(args)
-    rouge = RougeMetric()
+    # rouge = RougeMetric()
 
     if args.from_refine == "True":
-        qags_scores = qags.compute_metrics_from_refine(data=data, predictions=predictions)
-        print("QAGS Score: ", qags_scores)
+        # qags_scores = qags.compute_metrics_from_refine(data=data, predictions=predictions)
+        # print("QAGS Score: ", qags_scores)
 
         true_teacher_scores = true_teacher.compute_metrics_from_refine(data=data, predictions=predictions)
         print("True Teacher Score: ", true_teacher_scores)
 
-        rouge_scores = rouge.compute_metrics_from_refine(data=data, predictions=predictions)
-        print("Rouge Score: ", rouge_scores)
+        # rouge_scores = rouge.compute_metrics_from_refine(data=data, predictions=predictions)
+        # print("Rouge Score: ", rouge_scores)
 
     else:
-        qags_scores = qags.compute_metrics(data=data, predictions=predictions)
-        print("Factuality Score: ", qags_scores)
+        # qags_scores = qags.compute_metrics(data=data, predictions=predictions)
+        # print("Factuality Score: ", qags_scores)
 
         true_teacher_scores = true_teacher.compute_metrics(data=data, predictions=predictions)
         print("True Teacher Score: ", true_teacher_scores)
 
-        rouge_scores = rouge.compute_metrics(predictions=predictions)
-        print("Rouge Score: ", rouge_scores)
+        # rouge_scores = rouge.compute_metrics(predictions=predictions)
+        # print("Rouge Score: ", rouge_scores)
 
     
     
