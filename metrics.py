@@ -1,5 +1,4 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
 import json
 import random
 import re
@@ -9,11 +8,12 @@ from argparse import ArgumentParser
 from collections import Counter
 from tqdm import tqdm
 from torchmetrics.text.rouge import ROUGEScore
-from transformers import pipeline
+from transformers import pipeline, T5Tokenizer, T5ForConditionalGeneration
 from utils.generate_qa_pairs import generate_qa
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
 
 
-class FactualityMetric:
+class QAGSMetric:
 
     def __init__(self, args):
         
@@ -270,6 +270,95 @@ class RougeMetric:
             'rouge2': avg_rouge_2,
             'rougeL': avg_rouge_l
         }
+    
+
+class TrueTeacher:
+
+    def __init__(self, args):
+        self.save_path = args.save_path
+        self.prompt = "premise: {p}\nhypothesis: {h}"
+        self.max_length = args.max_length
+
+        self.tokenizer = T5Tokenizer.from_pretrained(args.model_path)
+        self.model = T5ForConditionalGeneration.from_pretrained(args.model_path)
+
+        self.saved_results = {}
+    
+    def compute_metrics(self, data, predictions):
+        avg_scores = 0
+        for pred in tqdm(predictions):
+            _id = pred['id']
+            pred_summary = pred['pred']
+            
+            context = ""
+            for d in data:
+                if d['id'] == _id:
+                    context = d['text'][:5000]
+            if context == "":
+                print("Source not found...")
+                continue
+            
+            input_ids = self.tokenizer(
+                self.prompt.format(p=context, h=pred_summary),
+                return_tensors='pt',
+                truncation=True,
+                max_length=self.max_length
+            ).input_ids
+            decoder_input_ids = torch.tensor([[self.tokenizer.pad_token_id]])
+            outputs = self.model(input_ids=input_ids, decoder_input_ids=decoder_input_ids)
+            logits = outputs.logits
+            probs = torch.softmax(logits[0], dim=-1)
+            one_token_id = self.tokenizer('1').input_ids[0]
+            entailment_prob = probs[0, one_token_id].item()
+
+            avg_scores += entailment_prob
+
+        avg_scores /= len(predictions)
+        return avg_scores
+    
+    def compute_metrics_from_refine(self, data, prediction):
+
+        tot_scores = 0.0
+        cnt = 0
+        for key in tqdm(predictions):
+            self.saved_results[key] = []
+            prediction = predictions[key]
+            context = ""
+            for d in data:
+                if d['id'] == key:
+                    context = d['text'][:5000]
+            if context == "":
+                continue
+
+            cur_fact_score = 0
+            for pred in prediction:
+                summary = pred['output']
+                if len(summary) == 0:
+                    continue
+                
+                input_ids = self.tokenizer(
+                    self.prompt.format(p=context, h=summary),
+                    return_tensors='pt',
+                    truncation=True,
+                    max_length=self.max_length
+                ).input_ids
+                decoder_input_ids = torch.tensor([[self.tokenizer.pad_token_id]])
+                outputs = self.model(input_ids=input_ids, decoder_input_ids=decoder_input_ids)
+                logits = outputs.logits
+                probs = torch.softmax(logits[0], dim=-1)
+                one_token_id = self.tokenizer('1').input_ids[0]
+                entailment_prob = probs[0, one_token_id].item()
+
+                self.saved_results[key].append(entailment_prob)
+                cur_fact_score = max(cur_fact_score, entailment_prob)
+            
+            if cur_fact_score > 0:
+                tot_scores += cur_fact_score
+                cnt += 1
+        tot_avg_score  = tot_scores / cnt
+        self.save_metrics()
+        return tot_avg_score
+
 
             
 if __name__ == '__main__':
@@ -300,12 +389,16 @@ if __name__ == '__main__':
     with open(args.prediction_path, "r") as f:
         predictions = json.load(f)
 
-    qags = FactualityMetric(args)
+    qags = QAGSMetric(args)
+    true_teacher = TrueTeacher(args)
     rouge = RougeMetric()
 
     if args.from_refine == "True":
         qags_scores = qags.compute_metrics_from_refine(data=data, predictions=predictions)
-        print("Factuality Score: ", qags_scores)
+        print("QAGS Score: ", qags_scores)
+
+        true_teacher_scores = true_teacher.compute_metrics_from_refine(data=data, predictions=predictions)
+        print("True Teacher Score: ", true_teacher_scores)
 
         rouge_scores = rouge.compute_metrics_from_refine(data=data, predictions=predictions)
         print("Rouge Score: ", rouge_scores)
@@ -313,6 +406,9 @@ if __name__ == '__main__':
     else:
         qags_scores = qags.compute_metrics(data=data, predictions=predictions)
         print("Factuality Score: ", qags_scores)
+
+        true_teacher_scores = true_teacher.compute_metrics(data=data, predictions=predictions)
+        print("True Teacher Score: ", true_teacher_scores)
 
         rouge_scores = rouge.compute_metrics(predictions=predictions)
         print("Rouge Score: ", rouge_scores)

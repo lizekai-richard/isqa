@@ -5,7 +5,7 @@ DATA_PATH="/mnt/data/zekai/summaries_after_tune_1200.json"
 SAVE_PATH="/mnt/data/zekai/qa_metric_result_1200.json"
 
 nohup python3 metric.py \
---model_name $MODEL_NAME \
+--model_path $MODEL_NAME \
 --data_path $DATA_PATH \
 --save_path $SAVE_PATH \
 --metrics_name "rouge" \
