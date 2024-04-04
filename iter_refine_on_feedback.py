@@ -133,7 +133,7 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
     output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                               clean_up_tokenization_spaces=True)
     # print("Answer+Evidence:", output)
-    if ("unanswerable" or "Unanswerable") in output:
+    if "unanswerable" in output or "Unanswerable" in output:
         return None, 0
 
     ans_index, sp_index = -1, -1

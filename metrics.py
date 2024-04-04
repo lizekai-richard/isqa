@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
 import json
 import random
 import re
@@ -58,7 +58,9 @@ class FactualityMetric:
             for d in data:
                 if d['id'] == _id:
                     context = d['text'][:5000]
-            assert context != ""
+            if context == "":
+                print("Source not found...")
+                continue
 
             avg_score = 0
             for question, answer in qa_pairs:
@@ -81,12 +83,14 @@ class FactualityMetric:
             for d in data:
                 if d['id'] == key:
                     context = d['text'][:5000]
-            assert context != ""
+            if context == "":
+                continue
 
             cur_fact_score = 0
             for pred in prediction:
                 summary = pred['output']
-
+                if len(summary) == 0:
+                    continue
                 qa_pairs = generate_qa(summary, n_qa_pairs=self.n_questions, qg_model_path=self.qg_model_path)
                 if len(qa_pairs) == 0:
                     continue
@@ -310,7 +314,7 @@ if __name__ == '__main__':
         qags_scores = qags.compute_metrics(data=data, predictions=predictions)
         print("Factuality Score: ", qags_scores)
 
-        rouge_scores = rouge.compute_metrics(data=data, predictions=predictions)
+        rouge_scores = rouge.compute_metrics(predictions=predictions)
         print("Rouge Score: ", rouge_scores)
 
     

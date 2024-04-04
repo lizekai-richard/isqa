@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+os.environ["CUDA_VISIBLE_DEVICES"]="1,2"
 import re
 import string
 import random
@@ -18,12 +19,10 @@ import argparse
 nlp = spacy.load("en_core_web_sm")
 
 def load_base_model(args):
-    if "t5" not in args.base_model_path:
+    if "llama" in args.base_model_path or "vicuna" in args.base_model_path:
         tokenizer = LlamaTokenizer.from_pretrained(args.base_model_path)
-
-        if ("llama" or "vicuna") in args.base_model_path:
-            tokenizer.pad_token = tokenizer.unk_token
-            tokenizer.padding_side = "left"
+        tokenizer.pad_token = tokenizer.unk_token
+        tokenizer.padding_side = "left"
 
         model = LlamaForCausalLM.from_pretrained(
             args.base_model_path,
@@ -130,6 +129,7 @@ def generate_feedback(args, model, tokenizer, summary, question, answer):
     output = tokenizer.decode(output_ids[0][len(input_ids[0]):], skip_special_tokens=True,
                               clean_up_tokenization_spaces=True)
     # print("Answer+Evidence:", output)
+    print(output)
     if ("unanswerable" or "Unanswerable") in output:
         return None, 0
 
@@ -283,11 +283,15 @@ def batched_refine_stage(args, base_model, base_tokenizer, feedback_model, feedb
 
             selected_feedback = {}
             full_feedback = {}
+
             for step, pair in enumerate(qa_pairs):
                 question, answer = pair
 
                 fact, non_fact, all_feedback = feedback_step(args, feedback_tokenizer, feedback_model, summary_samples,
                                                              question, answer)
+                
+                print("FACT:    ", fact)
+                print("NON-FACT:    ", non_fact)
 
                 selected_feedback[answer] = (fact, non_fact)
 
@@ -298,6 +302,9 @@ def batched_refine_stage(args, base_model, base_tokenizer, feedback_model, feedb
                     'selected_feedback': copy.deepcopy(selected_feedback),
                     'full_feedback': copy.deepcopy(full_feedback)
                 })
+
+                if step >= 8:
+                    break
 
                 summary_samples = refine_step(args, base_tokenizer, base_model, text, selected_feedback)
     return results_to_save
@@ -338,10 +345,12 @@ if __name__ == '__main__':
     base_tokenizer, base_model = load_base_model(args)
     feedback_tokenizer, feedback_model = load_feedback_model(args)
 
+    print("Running new refine process...")
+
     dataset = load_dataset("json", data_files=args.data_path)['train']
     # results_to_save = correction_stage(args, base_model, tokenizer, feedback_model, dataset.select(range(200, 300)))
     results_to_save = batched_refine_stage(args, base_model, base_tokenizer, feedback_model, feedback_tokenizer,
-                                           dataset.select(range(10)))
+                                           dataset.select(range(3, 4)))
 
     with open(args.save_path, "w") as f:
         json.dump(results_to_save, f)
